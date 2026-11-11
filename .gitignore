@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# PyInstaller (saida regeneravel a partir do .spec)
+build/
+dist/
+*.manifest
+
+# Editores / IDE
+.vscode/
+.idea/
+*.swp
+
+# Sistema
+Thumbs.db
+desktop.ini
+
+# Artefatos locais de teste/exportacao
+*.tmp
+v2/selftest.*

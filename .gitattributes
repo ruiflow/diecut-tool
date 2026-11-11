@@ -1,0 +1,8 @@
+# Normaliza finais de linha (repo em LF, checkout em CRLF no Windows)
+* text=auto
+
+# Binarios
+*.png binary
+*.ico binary
+*.exe binary
+*.zip binary
