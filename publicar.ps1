@@ -54,6 +54,17 @@ function Rodar($exe, [string[]]$argumentos, [switch]$Silencioso) {
     }
 }
 
+# Captura a saida de uma ferramenta nativa (stdout) sem tratar stderr como erro fatal.
+function Capturar($exe, [string[]]$argumentos) {
+    $anterior = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        return (& $exe @argumentos 2>$null)
+    } finally {
+        $ErrorActionPreference = $anterior
+    }
+}
+
 # --- 1. Ferramentas -------------------------------------------------------
 Passo "Verificando ferramentas"
 $Git = AcharFerramenta "git" @("$env:USERPROFILE\tools\git\cmd\git.exe")
@@ -173,7 +184,7 @@ if (-not $SkipReleases) {
         Copy-Item $v1exe $asset1 -Force
         if ((Rodar $Gh @("release", "view", "v1.0") -Silencioso) -ne 0) {
             Rodar $Gh @("release", "create", "v1.0", $asset1, "--title", "DieCUT Tool v1.0 (legado)",
-                "--notes-file", $notesV1Path) | Out-Null
+                "--notes-file", $notesV1Path, "--latest=false") | Out-Null
         } else {
             Rodar $Gh @("release", "upload", "v1.0", $asset1, "--clobber") | Out-Null
         }
@@ -181,8 +192,20 @@ if (-not $SkipReleases) {
     } else {
         Write-Host "aviso: $v1exe nao encontrado - release v1.0 ignorada" -ForegroundColor Yellow
     }
+
+    # A release v1.0 e criada depois da v2.0; o GitHub marca a mais recente como
+    # "Latest" por padrao. Forca a v2.0 como Latest para o botao principal.
+    $releaseJson = Capturar $Gh @("api", "repos/$Owner/$Repo/releases/tags/v2.0")
+    if ($releaseJson) {
+        $v2id = ($releaseJson | ConvertFrom-Json).id
+        if ($v2id) {
+            Rodar $Gh @("api", "-X", "PATCH", "repos/$Owner/$Repo/releases/$v2id", "-F", "make_latest=true") -Silencioso | Out-Null
+            Write-Host "v2.0 marcada como Latest"
+        }
+    }
 }
 
 Passo "Concluido"
 Write-Host "https://github.com/$Owner/$Repo" -ForegroundColor Green
 Write-Host "https://github.com/$Owner/$Repo/releases" -ForegroundColor Green
+exit 0
