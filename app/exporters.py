@@ -95,7 +95,7 @@ def export_pdf(
     c = pdf_canvas.Canvas(
         str(path), pagesize=(sheet.width * mm_unit, sheet.height * mm_unit)
     )
-    c.setTitle("DieCUT Tool v2.2 - Dielines")
+    c.setTitle("DieCUT Tool v3 - Dielines")
     c.setAuthor("DieCUT Tool")
     c.setSubject(f"{layout.columns} x {layout.rows} etiquetas - {label.shape.value}")
     c.setStrokeColorRGB(*ACCENT_RGB)
@@ -255,7 +255,7 @@ def export_cut_plan_pdf(
     c = pdf_canvas.Canvas(
         str(path), pagesize=(sheet.width * mm_unit, sheet.height * mm_unit)
     )
-    c.setTitle("DieCUT Tool v2.2 - Percurso de corte")
+    c.setTitle("DieCUT Tool v3 - Percurso de corte")
     c.setAuthor("DieCUT Tool")
     c.setSubject(
         f"Percurso {plan.strategy} - {plan.label_count} etiquetas - "

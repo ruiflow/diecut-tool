@@ -1,4 +1,4 @@
-"""Ponto de entrada da DieCUT Tool v2.2."""
+"""Ponto de entrada da DieCUT Tool v3."""
 
 from __future__ import annotations
 

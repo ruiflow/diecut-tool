@@ -13,8 +13,8 @@ grafo do código.
 O que foi preservado:
 
 - `main.py`, `requirements.txt`, `DieCutTool.spec` — código-fonte e receita de build;
-- o binário `DieCutTool-v1.0.exe` está disponível na
-  [release v1.0](https://github.com/ruiflow/diecut-tool/releases/tag/v1.0).
+- o binário `DieCutTool-v1.exe` está disponível na
+  [release v1](https://github.com/ruiflow/diecut-tool/releases/tag/v1).
 
 O que foi removido:
 

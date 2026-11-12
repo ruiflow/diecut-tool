@@ -1,11 +1,11 @@
-# Desenvolvimento — DieCUT Tool v2.2
+# Desenvolvimento — DieCUT Tool v3
 
 Gerador de cortantes (dielines) para etiquetas em folhas autocolantes.
-Esta versão nasce da v1 e implementa as melhorias planeadas para a linha 2.x.
+Esta versão nasce da v1 e implementa as melhorias planeadas para a linha 3.x.
 
 ![Pré-visualização](../assets/icon.png)
 
-## O que há de novo na v2.2
+## O que há de novo na v3
 
 | Melhoria | Como ficou implementada |
 | --- | --- |
@@ -67,7 +67,7 @@ python main.py --selftest .\saida_teste
 .\.venv\Scripts\pyinstaller.exe --noconfirm --clean DieCutTool.spec
 ```
 
-O executável fica em `dist/DieCutTool v2.2.exe`.
+O executável fica em `dist/DieCutTool v3.exe`.
 
 Também pode usar o script de build:
 

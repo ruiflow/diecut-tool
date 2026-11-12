@@ -106,7 +106,7 @@ Rodar $Git @("add", "-A") -Silencioso | Out-Null
 $staged = @(& $Git diff --cached --name-only)
 if ($staged.Count -gt 0) {
     Rodar $Git @("-c", "user.name=$Owner", "-c", "user.email=$Owner@users.noreply.github.com",
-        "commit", "-m", "DieCUT Tool v2.2: estrategias de percurso e guardar corte") -Silencioso | Out-Null
+        "commit", "-m", "DieCUT Tool v3: estrategias de percurso e guardar corte") -Silencioso | Out-Null
     Write-Host "$($staged.Count) arquivo(s) no commit"
 } else {
     Write-Host "nada novo para commitar"
@@ -134,12 +134,12 @@ Rodar $Gh @("repo", "edit", "$Owner/$Repo",
 # --- 5. Releases com os .exe ---------------------------------------------
 if (-not $SkipReleases) {
     Passo "Criando as releases com os executaveis"
-    $appExe = "dist\DieCutTool v2.2.exe"
-    $legacyExe = "legacy\v1\dist\DieCutTool v1.0.exe"
+    $appExe = "dist\DieCutTool v3.exe"
+    $legacyExe = "legacy\v1\dist\DieCutTool v1.exe"
     $stage = Join-Path $env:TEMP "diecut-release"
     New-Item -ItemType Directory -Force $stage | Out-Null
 
-    $notesV2 = @(
+    $notesV3 = @(
         "Percurso de corte configuravel, menos elevacoes de lamina e exportacao do traçado otimizado.",
         "",
         "- Tema escuro com cartoes e paleta magenta/ciano",
@@ -166,47 +166,47 @@ if (-not $SkipReleases) {
         "Mantida como legado para download e consulta. O desenvolvimento continua na versão atual."
     ) -join "`n"
 
-    $notesV2Path = Join-Path $stage "notas-v2.md"
+    $notesV3Path = Join-Path $stage "notas-v3.md"
     $notesV1Path = Join-Path $stage "notas-v1.md"
-    [System.IO.File]::WriteAllText($notesV2Path, $notesV2, (New-Object System.Text.UTF8Encoding $false))
+    [System.IO.File]::WriteAllText($notesV3Path, $notesV3, (New-Object System.Text.UTF8Encoding $false))
     [System.IO.File]::WriteAllText($notesV1Path, $notesV1, (New-Object System.Text.UTF8Encoding $false))
 
     if (Test-Path $appExe) {
-        $appAsset = Join-Path $stage "DieCutTool-v2.2.exe"
+        $appAsset = Join-Path $stage "DieCutTool-v3.exe"
         Copy-Item $appExe $appAsset -Force
-        if ((Rodar $Gh @("release", "view", "v2.2") -Silencioso) -ne 0) {
-            Rodar $Gh @("release", "create", "v2.2", $appAsset, "--title", "DieCUT Tool v2.2",
-                "--notes-file", $notesV2Path, "--latest") | Out-Null
+        if ((Rodar $Gh @("release", "view", "v3") -Silencioso) -ne 0) {
+            Rodar $Gh @("release", "create", "v3", $appAsset, "--title", "DieCUT Tool v3",
+                "--notes-file", $notesV3Path, "--latest") | Out-Null
         } else {
-            Rodar $Gh @("release", "upload", "v2.2", $appAsset, "--clobber") | Out-Null
+            Rodar $Gh @("release", "upload", "v3", $appAsset, "--clobber") | Out-Null
         }
-        Write-Host "release v2.2 publicada"
+        Write-Host "release v3 publicada"
     } else {
-        Write-Host "aviso: $appExe nao encontrado - release v2.2 ignorada" -ForegroundColor Yellow
+        Write-Host "aviso: $appExe nao encontrado - release v3 ignorada" -ForegroundColor Yellow
     }
 
     if (Test-Path $legacyExe) {
-        $legacyAsset = Join-Path $stage "DieCutTool-v1.0.exe"
+        $legacyAsset = Join-Path $stage "DieCutTool-v1.exe"
         Copy-Item $legacyExe $legacyAsset -Force
-        if ((Rodar $Gh @("release", "view", "v1.0") -Silencioso) -ne 0) {
-            Rodar $Gh @("release", "create", "v1.0", $legacyAsset, "--title", "DieCUT Tool v1.0 (legado)",
+        if ((Rodar $Gh @("release", "view", "v1") -Silencioso) -ne 0) {
+            Rodar $Gh @("release", "create", "v1", $legacyAsset, "--title", "DieCUT Tool v1 (legado)",
                 "--notes-file", $notesV1Path, "--latest=false") | Out-Null
         } else {
-            Rodar $Gh @("release", "upload", "v1.0", $legacyAsset, "--clobber") | Out-Null
+            Rodar $Gh @("release", "upload", "v1", $legacyAsset, "--clobber") | Out-Null
         }
-        Write-Host "release v1.0 publicada"
+        Write-Host "release v1 publicada"
     } else {
-        Write-Host "aviso: $legacyExe nao encontrado - release v1.0 ignorada" -ForegroundColor Yellow
+        Write-Host "aviso: $legacyExe nao encontrado - release v1 ignorada" -ForegroundColor Yellow
     }
 
-    # A release v1.0 e criada depois da v2.2; o GitHub marca a mais recente como
-    # "Latest" por padrao. Forca a v2.2 como Latest para o botao principal.
-    $releaseJson = Capturar $Gh @("api", "repos/$Owner/$Repo/releases/tags/v2.2")
+    # A release v1 e criada depois da v3; o GitHub marca a mais recente como
+    # "Latest" por padrao. Forca a v3 como Latest para o botao principal.
+    $releaseJson = Capturar $Gh @("api", "repos/$Owner/$Repo/releases/tags/v3")
     if ($releaseJson) {
-        $v2id = ($releaseJson | ConvertFrom-Json).id
-        if ($v2id) {
-            Rodar $Gh @("api", "-X", "PATCH", "repos/$Owner/$Repo/releases/$v2id", "-F", "make_latest=true") -Silencioso | Out-Null
-            Write-Host "v2.2 marcada como Latest"
+        $v3id = ($releaseJson | ConvertFrom-Json).id
+        if ($v3id) {
+            Rodar $Gh @("api", "-X", "PATCH", "repos/$Owner/$Repo/releases/$v3id", "-F", "make_latest=true") -Silencioso | Out-Null
+            Write-Host "v3 marcada como Latest"
         }
     }
 }

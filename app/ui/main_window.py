@@ -1,4 +1,4 @@
-"""Janela principal da DieCUT Tool v2.2."""
+"""Janela principal da DieCUT Tool v3."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ from .widgets import Card, NumberSpinbox, StatusDot
 
 class MainWindow(ctk.CTk):
     APP_NAME = "DieCUT Tool"
-    VERSION = "2.2"
+    VERSION = "3"
 
     def __init__(self) -> None:
         super().__init__(fg_color=theme.BG)

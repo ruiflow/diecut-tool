@@ -21,4 +21,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller falhou."
 }
 
-Write-Host "Executavel gerado em dist\DieCutTool v2.2.exe" -ForegroundColor Green
+Write-Host "Executavel gerado em dist\DieCutTool v3.exe" -ForegroundColor Green

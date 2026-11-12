@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.2]
+## [3]
 
 ### Adicionado
 
@@ -17,14 +17,16 @@
 
 - Estrutura do repositório simplificada: aplicação na raiz, legado em
   `legacy/`, automação em `scripts/` e documentação em `docs/`.
+- Esquema de versões normalizado para **v1, v2 e v3** (antes v1.0, v2.0 e
+  v2.2), incluindo aplicação, executáveis, tags e releases.
 
-## [2.0]
+## [2]
 
 - Interface renovada com pré-visualização 2D/3D e órbita livre.
 - Exportação DXF e PDF no tamanho exato da folha.
 - Distribuição automática de colunas e fileiras.
 - Formatos retângulo, oval e círculo.
 
-## [1.0]
+## [1]
 
 - Versão inicial: cálculo de layout e exportação de dielines.

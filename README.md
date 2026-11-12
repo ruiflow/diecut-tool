@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/screenshots/01-preview-2d.png" alt="DieCUT Tool v2 — pré-visualização 2D" width="860">
+<img src="docs/screenshots/01-preview-2d.png" alt="DieCUT Tool v3 — pré-visualização 2D" width="860">
 
 # DieCUT Tool
 
@@ -8,8 +8,9 @@
 
 Pré-visualização 2D/3D com órbita livre, simulação de corte com percurso otimizado, distribuição automática e exportação vetorial para **PDF** e **DXF**.
 
-[![Baixar v2.2](https://img.shields.io/badge/Baixar-v2.2%20EXE-ff2d95?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/latest/download/DieCutTool-v2.2.exe)
-[![Baixar v1.0](https://img.shields.io/badge/Baixar-v1.0%20EXE%20(legado)-4b4b63?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/download/v1.0/DieCutTool-v1.0.exe)
+[![Baixar v3](https://img.shields.io/badge/Baixar-v3%20EXE-ff2d95?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/latest/download/DieCutTool-v3.exe)
+[![Baixar v2](https://img.shields.io/badge/Baixar-v2%20EXE-4b4b63?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/download/v2/DieCutTool-v2.exe)
+[![Baixar v1](https://img.shields.io/badge/Baixar-v1%20EXE%20(legado)-2b2b38?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/download/v1/DieCutTool-v1.exe)
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?logo=windows&logoColor=white)
@@ -29,7 +30,7 @@ resultado em pré-visualização e exporta o arquivo pronto para a plotter/corta
 Nasceu de uma necessidade real de produção: substituir o cálculo manual de colunas e
 espaçamentos por um arquivo vetorial que já sai na medida exata da folha.
 
-## Novidades na v2.2
+## Novidades na v3
 
 - **Percurso de corte otimizado**: escolha entre **Proximidade** (vizinho mais
   próximo + 2-opt) e **Zigue-zague** (linha a linha, com serpentina entre
@@ -90,11 +91,11 @@ não é preciso instalar Python nem dependências.
 
 | Versão | Arquivo | Tamanho | Observação |
 | --- | --- | --- | --- |
-| **v2.2** | `DieCutTool-v2.2.exe` | ~38 MB | Atual: percurso por proximidade/zigue-zague, sem repetir arestas, guardar corte em DXF/PDF |
-| **v2.0** | `DieCutTool-v2.0.exe` | ~36 MB | Versão anterior: interface nova, 2D/3D, DXF e modo automático |
-| **v1.0** | `DieCutTool-v1.0.exe` | ~30 MB | Versão original (legado), mantida para compatibilidade |
+| **v3** | `DieCutTool-v3.exe` | ~38 MB | Atual: percurso por proximidade/zigue-zague, sem repetir arestas, guardar corte em DXF/PDF |
+| **v2** | `DieCutTool-v2.exe` | ~36 MB | Versão anterior: interface nova, 2D/3D, DXF e modo automático |
+| **v1** | `DieCutTool-v1.exe` | ~30 MB | Versão original (legado), mantida para compatibilidade |
 
-> O código-fonte atual está em **`app/`** e corresponde à **v2.2**. O executável
+> O código-fonte atual está em **`app/`** e corresponde à **v3**. O executável
 > publicado já inclui todas as funcionalidades descritas acima.
 
 > O Windows pode exibir o aviso do SmartScreen porque o executável não é assinado
@@ -129,7 +130,7 @@ em serpentina e a exportação real para PDF/DXF (validada com `ezdxf`).
 .\.venv\Scripts\pyinstaller.exe --noconfirm --clean DieCutTool.spec
 ```
 
-O resultado fica em `dist/DieCutTool v2.2.exe`. Também pode usar
+O resultado fica em `dist/DieCutTool v3.exe`. Também pode usar
 `.\scripts\build.ps1`.
 
 ## Estrutura do repositório
@@ -157,7 +158,7 @@ O resultado fica em `dist/DieCutTool v2.2.exe`. Também pode usar
 └── README.md
 ```
 
-**v1 × v2:** a v1 é um aplicativo único em Tkinter (`FlowCutApp`, `LayoutCalculator`),
+**v1 × v3:** a v1 é um aplicativo único em Tkinter (`FlowCutApp`, `LayoutCalculator`),
 mantido em `legacy/` apenas como histórico e para download. Todo o desenvolvimento
 acontece na versão atual, modular (`app/models.py`, `geometry.py`, `layout.py`,
 `cutting.py`, `exporters.py`, `ui/`) e sem qualquer dependência da v1.
