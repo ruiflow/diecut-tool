@@ -6,14 +6,14 @@
 
 **Gerador de cortantes (dielines) para etiquetas em folhas autocolantes.**
 
-Pré-visualização 2D/3D com órbita livre, simulação de corte, distribuição automática e exportação vetorial para **PDF** e **DXF**.
+Pré-visualização 2D/3D com órbita livre, simulação de corte com percurso otimizado, distribuição automática e exportação vetorial para **PDF** e **DXF**.
 
-[![Baixar v2.0](https://img.shields.io/badge/Baixar-v2.0%20EXE-ff2d95?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/latest/download/DieCutTool-v2.0.exe)
+[![Baixar v2.2](https://img.shields.io/badge/Baixar-v2.2%20EXE-ff2d95?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/latest/download/DieCutTool-v2.2.exe)
 [![Baixar v1.0](https://img.shields.io/badge/Baixar-v1.0%20EXE%20(legado)-4b4b63?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/download/v1.0/DieCutTool-v1.0.exe)
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?logo=windows&logoColor=white)
-![Testes](https://img.shields.io/badge/testes-30%20a%20passar-2ea043)
+![Testes](https://img.shields.io/badge/testes-32%20a%20passar-2ea043)
 ![Sem instalação](https://img.shields.io/badge/EXE-sem%20instala%C3%A7%C3%A3o-8957e5)
 
 </div>
@@ -28,6 +28,22 @@ resultado em pré-visualização e exporta o arquivo pronto para a plotter/corta
 
 Nasceu de uma necessidade real de produção: substituir o cálculo manual de colunas e
 espaçamentos por um arquivo vetorial que já sai na medida exata da folha.
+
+## Novidades na v2.2
+
+- **Percurso de corte otimizado**: escolha entre **Proximidade** (vizinho mais
+  próximo + 2-opt) e **Zigue-zague** (linha a linha, com serpentina entre
+  contornos encostados).
+- **Sem cortes repetidos**: os contornos são fundidos num grafo de arestas
+  únicas. Cada aresta é cortada uma só vez; o percurso pode passar pelo mesmo
+  vértice ou ponto de contacto.
+- **Menos elevações de lâmina**: contornos que se tocam são cortados num só
+  percurso. Quando um único trilho é impossível, o componente é dividido em
+  trilhos válidos e a lâmina levanta apenas entre eles.
+- **Guardar o percurso**: durante a simulação, exporte o traçado pela ordem
+  calculada em DXF (layers `CORTE` e `DESLOCAMENTO`) ou PDF de referência.
+- **Estatísticas da simulação**: comprimento cortado, ligações entre contornos,
+  deslocamentos em vazio e número de elevações.
 
 ## Demonstração
 
@@ -56,7 +72,7 @@ espaçamentos por um arquivo vetorial que já sai na medida exata da folha.
 | | |
 | --- | --- |
 | **Pré-visualização 2D/3D** | Vista 2D com zoom/pan e vista 3D com órbita 360° pelo rato, espessura, relevo e oclusão por profundidade. |
-| **Simulação de corte** | Reproduz uma plotter a cortar a folha, com cabeça animada, velocidade ajustável e percurso otimizado por **proximidade** ou **zigue-zague**. |
+| **Simulação de corte** | Reproduz uma plotter a cortar a folha, com cabeça animada, velocidade ajustável, estatísticas (corte, ligações, deslocamento e elevações) e percurso otimizado por **proximidade** ou **zigue-zague**. |
 | **Menos elevações de lâmina** | Os contornos que se tocam são fundidos num grafo de arestas únicas: o corte continua de um para o outro sem levantar a lâmina e sem passar duas vezes sobre a mesma aresta. |
 | **Guardar percurso** | Exporta o traçado pela ordem da simulação em DXF (layers `CORTE` e `DESLOCAMENTO`) ou PDF de referência. Cada trilho contínuo fica numa única polilinha, cortada num só movimento. |
 | **Modo automático** | Calcula o número máximo de colunas e fileiras que cabem na folha, atualizado em tempo real. |
@@ -74,13 +90,12 @@ não é preciso instalar Python nem dependências.
 
 | Versão | Arquivo | Tamanho | Observação |
 | --- | --- | --- | --- |
-| **v2.0** | `DieCutTool-v2.0.exe` | ~36 MB | Executável publicado: interface nova, 2D/3D, DXF, modo automático |
+| **v2.2** | `DieCutTool-v2.2.exe` | ~38 MB | Atual: percurso por proximidade/zigue-zague, sem repetir arestas, guardar corte em DXF/PDF |
+| **v2.0** | `DieCutTool-v2.0.exe` | ~36 MB | Versão anterior: interface nova, 2D/3D, DXF e modo automático |
 | **v1.0** | `DieCutTool-v1.0.exe` | ~30 MB | Versão original (legado), mantida para compatibilidade |
 
-> O código-fonte atual corresponde à **v2.2**, que acrescenta as estratégias de
-> percurso, a redução de elevações de lâmina e a exportação do percurso
-> otimizado. O executável dessa versão pode ser gerado com o comando indicado
-> abaixo.
+> O código-fonte atual está em **`v2/`** e corresponde à **v2.2**. O executável
+> publicado já inclui todas as funcionalidades descritas acima.
 
 > O Windows pode exibir o aviso do SmartScreen porque o executável não é assinado
 > digitalmente. Clique em **Mais informações → Executar assim mesmo**.
