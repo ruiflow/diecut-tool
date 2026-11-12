@@ -6,14 +6,14 @@
 
 **Gerador de cortantes (dielines) para etiquetas em folhas autocolantes.**
 
-Pré-visualização 2D/3D, distribuição automática e exportação vetorial para **PDF** e **DXF**.
+Pré-visualização 2D/3D com órbita livre, simulação de corte, distribuição automática e exportação vetorial para **PDF** e **DXF**.
 
 [![Baixar v2.0](https://img.shields.io/badge/Baixar-v2.0%20EXE-ff2d95?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/latest/download/DieCutTool-v2.0.exe)
 [![Baixar v1.0](https://img.shields.io/badge/Baixar-v1.0%20EXE%20(legado)-4b4b63?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/download/v1.0/DieCutTool-v1.0.exe)
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?logo=windows&logoColor=white)
-![Testes](https://img.shields.io/badge/testes-19%20a%20passar-2ea043)
+![Testes](https://img.shields.io/badge/testes-30%20a%20passar-2ea043)
 ![Sem instalação](https://img.shields.io/badge/EXE-sem%20instala%C3%A7%C3%A3o-8957e5)
 
 </div>
@@ -31,10 +31,15 @@ espaçamentos por um arquivo vetorial que já sai na medida exata da folha.
 
 ## Demonstração
 
-| Pré-visualização 2D | Vista isométrica 3D |
+| Pré-visualização 2D | Vista 3D com órbita |
 | :---: | :---: |
 | <img src="docs/screenshots/01-preview-2d.png" width="430"> | <img src="docs/screenshots/02-preview-3d.png" width="430"> |
-| Grelha adaptativa, margem sombreada e recorte das dielines que saem da folha | Folha em perspectiva com espessura, relevo e ordenação por profundidade |
+| Grelha adaptativa e recorte das dielines que saem da folha | Folha em perspetiva com espessura, relevo e rotação 360° com o rato |
+
+| Simulação de corte |
+| :---: |
+| <img src="docs/screenshots/07-simulacao-corte.png" width="430"> |
+| Percurso por proximidade ou zigue-zague, contornos encostados cortados sem repetir arestas e exportação do percurso otimizado |
 
 | Formatos ovais e círculos | Over-compensate e modo automático |
 | :---: | :---: |
@@ -44,20 +49,23 @@ espaçamentos por um arquivo vetorial que já sai na medida exata da folha.
 | Círculo (medidas acopladas) | Modo automático |
 | :---: | :---: |
 | <img src="docs/screenshots/04-formato-circulo.png" width="430"> | <img src="docs/screenshots/06-modo-automatico.png" width="430"> |
-| No formato círculo, largura e altura são sincronizadas | Colunas e fileiras calculadas da área útil: 3 × 9 = 27 etiquetas |
+| No formato círculo, largura e altura são sincronizadas | Colunas e fileiras calculadas a partir da folha inteira: 4 × 9 = 36 etiquetas |
 
 ## Funcionalidades
 
 | | |
 | --- | --- |
-| **Pré-visualização 2D/3D** | Alternador com vista isométrica, zoom (roda do rato e botões), pan, grelha adaptativa e margem sombreada. |
-| **Modo automático** | Calcula o número máximo de colunas e fileiras que cabem na área útil, atualizado em tempo real. |
+| **Pré-visualização 2D/3D** | Vista 2D com zoom/pan e vista 3D com órbita 360° pelo rato, espessura, relevo e oclusão por profundidade. |
+| **Simulação de corte** | Reproduz uma plotter a cortar a folha, com cabeça animada, velocidade ajustável e percurso otimizado por **proximidade** ou **zigue-zague**. |
+| **Menos elevações de lâmina** | Os contornos que se tocam são fundidos num grafo de arestas únicas: o corte continua de um para o outro sem levantar a lâmina e sem passar duas vezes sobre a mesma aresta. |
+| **Guardar percurso** | Exporta o traçado pela ordem da simulação em DXF (layers `CORTE` e `DESLOCAMENTO`) ou PDF de referência. Cada trilho contínuo fica numa única polilinha, cortada num só movimento. |
+| **Modo automático** | Calcula o número máximo de colunas e fileiras que cabem na folha, atualizado em tempo real. |
 | **Formatos de etiqueta** | Retângulo (com raio de canto), oval e círculo. |
 | **Over-compensate** | Sobreposição no início do caminho para a lâmina fechar o corte, sem alterar a medida da etiqueta. O troço aparece em ciano. |
 | **Exportação PDF** | Vetorial, uma página no tamanho exato da folha. |
 | **Exportação DXF** | Milímetros, `$INSUNITS = 4`, todas as dielines no layer `DIELINE`. |
 | **Validação em tempo real** | Avisa quando o layout excede a folha e bloqueia a exportação de dielines fora da área. |
-| **Atalhos** | `Ctrl+P` PDF, `Ctrl+D` DXF, `Ctrl+0` ajustar, `Ctrl+ + / -` zoom. |
+| **Atalhos** | `Ctrl+P` PDF, `Ctrl+D` DXF, `Ctrl+0` ajustar, `Ctrl+ + / -` zoom, `F5` simulação. |
 
 ## Download
 
@@ -66,8 +74,13 @@ não é preciso instalar Python nem dependências.
 
 | Versão | Arquivo | Tamanho | Observação |
 | --- | --- | --- | --- |
-| **v2.0** | `DieCutTool-v2.0.exe` | ~36 MB | Versão atual: interface nova, 2D/3D, DXF, modo automático |
+| **v2.0** | `DieCutTool-v2.0.exe` | ~36 MB | Executável publicado: interface nova, 2D/3D, DXF, modo automático |
 | **v1.0** | `DieCutTool-v1.0.exe` | ~30 MB | Versão original (legado), mantida para compatibilidade |
+
+> O código-fonte atual corresponde à **v2.2**, que acrescenta as estratégias de
+> percurso, a redução de elevações de lâmina e a exportação do percurso
+> otimizado. O executável dessa versão pode ser gerado com o comando indicado
+> abaixo.
 
 > O Windows pode exibir o aviso do SmartScreen porque o executável não é assinado
 > digitalmente. Clique em **Mais informações → Executar assim mesmo**.
@@ -90,8 +103,9 @@ cd v2
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-19 testes cobrem cálculo automático, alinhamento, compensação, geometria e a exportação
-real para PDF/DXF (validada com `ezdxf`).
+32 testes cobrem cálculo automático, alinhamento, compensação, geometria,
+projeção 3D, as duas estratégias de percurso, a partilha de arestas, os trilhos
+em serpentina e a exportação real para PDF/DXF (validada com `ezdxf`).
 
 ### Gerar o executável
 
@@ -101,7 +115,7 @@ cd v2
 .\.venv\Scripts\pyinstaller.exe --noconfirm DieCutTool_v2.spec
 ```
 
-O resultado fica em `v2/dist/DieCutTool v2.0.exe`.
+O resultado fica em `v2/dist/DieCutTool v2.2.exe`.
 
 ## Estrutura do repositório
 
@@ -109,7 +123,7 @@ O resultado fica em `v2/dist/DieCutTool v2.0.exe`.
 .
 ├── v2/                     # versão atual (aplicação ativa)
 │   ├── main.py
-│   ├── app/                # models, geometry, layout, exporters, ui/
+│   ├── app/                # models, geometry, layout, cutting, exporters, ui/
 │   ├── tests/              # testes do núcleo
 │   ├── assets/             # ícones
 │   └── DieCutTool_v2.spec  # build PyInstaller

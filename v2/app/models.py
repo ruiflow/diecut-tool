@@ -1,4 +1,4 @@
-"""Modelos de domínio da DieCUT Tool v2.0.
+"""Modelos de domínio da DieCUT Tool v2.2.
 
 Mantém os cálculos independentes da interface: a UI apenas lê e escreve
 nestas estruturas, o que facilita testes e exportação.
@@ -27,23 +27,18 @@ MIN_SIZE_MM = 0.2
 
 @dataclass(frozen=True)
 class SheetSpec:
-    """Folha onde as etiquetas são distribuídas (medidas em mm)."""
+    """Folha onde as etiquetas são distribuídas (medidas em mm).
+
+    A folha é usada por inteiro: não existe margem de segurança, pelo que a
+    área útil coincide com a área total.
+    """
 
     width: float
     height: float
-    margin: float = 5.0
 
     @property
     def is_valid(self) -> bool:
         return self.width > MIN_SIZE_MM and self.height > MIN_SIZE_MM
-
-    @property
-    def usable_width(self) -> float:
-        return max(0.0, self.width - 2.0 * max(0.0, self.margin))
-
-    @property
-    def usable_height(self) -> float:
-        return max(0.0, self.height - 2.0 * max(0.0, self.margin))
 
     @property
     def area(self) -> float:

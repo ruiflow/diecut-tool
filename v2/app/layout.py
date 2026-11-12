@@ -16,11 +16,9 @@ def auto_grid(
     spacing_h: float,
     spacing_v: float,
 ) -> tuple[int, int]:
-    """Número máximo de colunas/fileiras que cabem na área útil."""
+    """Número máximo de colunas/fileiras que cabem na folha."""
 
     if not sheet.is_valid or not label.is_valid:
-        return 0, 0
-    if sheet.usable_width <= 0 or sheet.usable_height <= 0:
         return 0, 0
 
     spacing_h = max(0.0, spacing_h)
@@ -28,17 +26,17 @@ def auto_grid(
     cell_w = max(label.width, 0.001)
     cell_h = max(label.height, 0.001)
 
-    cols = math.floor((sheet.usable_width + spacing_h) / (cell_w + spacing_h) + EPSILON)
-    rows = math.floor((sheet.usable_height + spacing_v) / (cell_h + spacing_v) + EPSILON)
+    cols = math.floor((sheet.width + spacing_h) / (cell_w + spacing_h) + EPSILON)
+    rows = math.floor((sheet.height + spacing_v) / (cell_h + spacing_v) + EPSILON)
     return max(0, cols), max(0, rows)
 
 
-def _offset(usable: float, block: float, margin: float, align: str) -> float:
+def _offset(usable: float, block: float, align: str) -> float:
     if align == "Centro":
-        return margin + (usable - block) / 2.0
+        return (usable - block) / 2.0
     if align in ("Direita", "Baixo"):
-        return margin + usable - block
-    return margin
+        return usable - block
+    return 0.0
 
 
 def compute_layout(
@@ -68,12 +66,12 @@ def compute_layout(
     result.block_width = block_w
     result.block_height = block_h
 
-    result.overflow_x = max(0.0, block_w - sheet.usable_width)
-    result.overflow_y = max(0.0, block_h - sheet.usable_height)
+    result.overflow_x = max(0.0, block_w - sheet.width)
+    result.overflow_y = max(0.0, block_h - sheet.height)
     result.fits = result.overflow_x <= EPSILON and result.overflow_y <= EPSILON
 
-    origin_x = _offset(sheet.usable_width, block_w, max(0.0, sheet.margin), spec.align_h)
-    origin_y = _offset(sheet.usable_height, block_h, max(0.0, sheet.margin), spec.align_v)
+    origin_x = _offset(sheet.width, block_w, spec.align_h)
+    origin_y = _offset(sheet.height, block_h, spec.align_v)
 
     positions: list[tuple[float, float]] = []
     for row in range(spec.rows):
@@ -92,7 +90,7 @@ def compute_layout(
             parts.append(f"{result.overflow_x:.1f} mm na horizontal")
         if result.overflow_y > EPSILON:
             parts.append(f"{result.overflow_y:.1f} mm na vertical")
-        result.warnings.append("O layout excede a área útil em " + " e ".join(parts) + ".")
+        result.warnings.append("O layout excede a folha em " + " e ".join(parts) + ".")
     if result.count > MAX_AUTO_LABELS:
         result.warnings.append(
             "Demasiadas etiquetas: a pré-visualização usa um modo simplificado."

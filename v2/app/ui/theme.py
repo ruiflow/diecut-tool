@@ -1,4 +1,4 @@
-"""Paleta e tipografia da interface v2.0."""
+"""Paleta e tipografia da interface v2.2."""
 
 from __future__ import annotations
 

@@ -10,11 +10,14 @@ from reportlab.lib.units import mm as mm_unit
 from reportlab.pdfgen import canvas as pdf_canvas
 
 from . import geometry
+from .cutting import KIND_CUT, CutPlan
 from .layout import shape_origin
 from .models import LabelSpec, LayoutResult, ShapeType, SheetSpec
 
 ACCENT_RGB = (0.878, 0.251, 0.627)  # #e040a0
 DIELINE_LAYER = "DIELINE"
+CUT_LAYER = "CORTE"
+TRAVEL_LAYER = "DESLOCAMENTO"
 BULGE_90 = math.tan(math.radians(90.0) / 4.0)  # 0.4142...
 
 
@@ -92,7 +95,7 @@ def export_pdf(
     c = pdf_canvas.Canvas(
         str(path), pagesize=(sheet.width * mm_unit, sheet.height * mm_unit)
     )
-    c.setTitle("DieCUT Tool v2.0 - Dielines")
+    c.setTitle("DieCUT Tool v2.2 - Dielines")
     c.setAuthor("DieCUT Tool")
     c.setSubject(f"{layout.columns} x {layout.rows} etiquetas - {label.shape.value}")
     c.setStrokeColorRGB(*ACCENT_RGB)
@@ -234,6 +237,124 @@ def export_dxf(
             _dxf_rect(msp, label, x, y_bottom)
         else:
             _dxf_ellipse(msp, label, x, y_bottom)
+
+    doc.set_modelspace_vport(
+        height=max(sheet.height, 1.0),
+        center=(sheet.width / 2.0, sheet.height / 2.0),
+    )
+    doc.saveas(str(path))
+
+
+def export_cut_plan_pdf(
+    path: str | Path,
+    sheet: SheetSpec,
+    plan: CutPlan,
+) -> None:
+    """Gera um PDF com o percurso da simulação, pela ordem calculada."""
+
+    c = pdf_canvas.Canvas(
+        str(path), pagesize=(sheet.width * mm_unit, sheet.height * mm_unit)
+    )
+    c.setTitle("DieCUT Tool v2.2 - Percurso de corte")
+    c.setAuthor("DieCUT Tool")
+    c.setSubject(
+        f"Percurso {plan.strategy} - {plan.label_count} etiquetas - "
+        f"{plan.lift_count} elevacoes"
+    )
+    c.setLineJoin(1)
+
+    for segment in plan.segments:
+        if len(segment.points) < 2:
+            continue
+        point = c.beginPath()
+        first_x, first_y = segment.points[0]
+        point.moveTo(first_x * mm_unit, (sheet.height - first_y) * mm_unit)
+        for px, py in segment.points[1:]:
+            point.lineTo(px * mm_unit, (sheet.height - py) * mm_unit)
+
+        if segment.kind == KIND_CUT:
+            c.setStrokeColorRGB(*ACCENT_RGB)
+            c.setLineWidth(0.35 * mm_unit)
+            c.setDash()
+        else:
+            c.setStrokeColorRGB(0.20, 0.75, 0.86)
+            c.setLineWidth(0.25 * mm_unit)
+            c.setDash(2, 2)
+        c.drawPath(point, stroke=1, fill=0)
+
+    c.showPage()
+    c.save()
+
+
+def export_cut_plan_dxf(
+    path: str | Path,
+    sheet: SheetSpec,
+    plan: CutPlan,
+) -> None:
+    """Gera um DXF com o percurso otimizado, pela ordem da simulação.
+
+    O layer ``CORTE`` contém os traços com a lâmina em baixo (incluindo os
+    contornos encostados cortados num só trilho) e o layer ``DESLOCAMENTO``
+    contém os movimentos em vazio. Este último é marcado para não ser plotado,
+    mas fica visível em qualquer programa de CAD.
+    """
+
+    doc = ezdxf.new("R2010", setup=True)
+    doc.units = ezdxf.units.MM
+    doc.header["$INSUNITS"] = 4
+    doc.header["$MEASUREMENT"] = 1
+
+    cut_layer = doc.layers.add(CUT_LAYER, color=6)
+    cut_layer.dxf.linetype = "CONTINUOUS"
+    try:
+        cut_layer.rgb = (224, 64, 160)
+    except (AttributeError, ValueError):
+        pass
+
+    travel_layer = doc.layers.add(TRAVEL_LAYER, color=4)
+    try:
+        travel_layer.dxf.linetype = "DASHED"
+    except (AttributeError, ValueError):
+        pass
+    try:
+        travel_layer.dxf.plot = 0
+    except (AttributeError, ValueError):
+        pass
+
+    msp = doc.modelspace()
+    run: list[tuple[float, float]] = []
+
+    def flush_run() -> None:
+        nonlocal run
+        if len(run) >= 2:
+            msp.add_lwpolyline(
+                run,
+                format="xy",
+                close=False,
+                dxfattribs={"layer": CUT_LAYER},
+            )
+        run = []
+
+    for segment in plan.segments:
+        if len(segment.points) < 2:
+            continue
+        points = [(px, sheet.height - py) for px, py in segment.points]
+        if segment.kind == KIND_CUT:
+            if run and segment.linked:
+                # Continua o traço anterior sem levantar a lâmina: uma única
+                # polilinha, para a plotter não cortar em dois movimentos.
+                run.extend(points[1:])
+            else:
+                flush_run()
+                run = points
+        else:
+            flush_run()
+            msp.add_line(
+                points[0],
+                points[1],
+                dxfattribs={"layer": TRAVEL_LAYER},
+            )
+    flush_run()
 
     doc.set_modelspace_vport(
         height=max(sheet.height, 1.0),

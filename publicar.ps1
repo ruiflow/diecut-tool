@@ -106,7 +106,7 @@ Rodar $Git @("add", "-A") -Silencioso | Out-Null
 $staged = @(& $Git diff --cached --name-only)
 if ($staged.Count -gt 0) {
     Rodar $Git @("-c", "user.name=$Owner", "-c", "user.email=$Owner@users.noreply.github.com",
-        "commit", "-m", "DieCUT Tool v2.0: aplicacao, testes e documentacao") -Silencioso | Out-Null
+        "commit", "-m", "DieCUT Tool v2.2: estrategias de percurso e guardar corte") -Silencioso | Out-Null
     Write-Host "$($staged.Count) arquivo(s) no commit"
 } else {
     Write-Host "nada novo para commitar"
@@ -118,7 +118,7 @@ Rodar $Gh @("auth", "setup-git") -Silencioso | Out-Null
 
 if ((Rodar $Gh @("repo", "view", "$Owner/$Repo") -Silencioso) -ne 0) {
     Rodar $Gh @("repo", "create", "$Owner/$Repo", "--$Visibility", "--source", ".", "--remote", "origin", "--push",
-        "--description", "Gerador de cortantes (dielines) para etiquetas: pre-visualizacao 2D/3D, PDF e DXF") | Out-Null
+        "--description", "Gerador de cortantes (dielines) para etiquetas: pre-visualizacao 2D/3D, simulacao de corte, PDF e DXF") | Out-Null
 } else {
     Write-Host "repositorio ja existe - enviando commits"
     if ((Rodar $Git @("remote", "get-url", "origin") -Silencioso) -ne 0) {
@@ -134,22 +134,28 @@ Rodar $Gh @("repo", "edit", "$Owner/$Repo",
 # --- 5. Releases com os .exe ---------------------------------------------
 if (-not $SkipReleases) {
     Passo "Criando as releases com os executaveis"
-    $v2exe = "v2\dist\DieCutTool v2.0.exe"
+    $v2exe = "v2\dist\DieCutTool v2.2.exe"
     $v1exe = "_legacy\v1\dist\DieCutTool v1.0.exe"
     $stage = Join-Path $env:TEMP "diecut-release"
     New-Item -ItemType Directory -Force $stage | Out-Null
 
     $notesV2 = @(
-        "Interface redesenhada, pre-visualizacao 2D/3D, exportacao DXF e modo automatico de distribuicao.",
+        "Percurso de corte configuravel, menos elevacoes de lamina e exportacao do traçado otimizado.",
         "",
         "- Tema escuro com cartoes e paleta magenta/ciano",
-        "- Pre-visualizacao 2D/3D isometrica com zoom, grelha adaptativa e margens",
+        "- Pre-visualizacao 2D/3D com orbita 360 graus pelo rato, zoom, pan e grelha adaptativa",
+        "- Simulacao de corte com cabeca animada e velocidade ajustavel",
+        "- Ordem de corte por proximidade (vizinho mais proximo + 2-opt) ou em zigue-zague",
+        "- Contornos encostados fundidos num grafo de arestas unicas, sem cortar duas vezes a mesma aresta",
+        "- Estatisticas de corte, ligacoes, deslocamento e numero de elevacoes",
+        "- Guardar o percurso otimizado em DXF (layers CORTE e DESLOCAMENTO) ou PDF",
+        "- Margem de seguranca removida: a folha e usada por inteiro",
         "- Modo automatico de colunas e fileiras",
         "- Formatos retangulo (raio de canto), oval e circulo",
         "- Over-compensate para a lamina fechar o corte",
         "- Exportacao PDF vetorial no tamanho exato da folha",
         "- Exportacao DXF em milimetros, layer DIELINE",
-        "- 19 testes automatizados",
+        "- 32 testes automatizados",
         "",
         "**Requisitos:** Windows 10/11. Nao e necessaria instalacao."
     ) -join "`n"
@@ -166,17 +172,17 @@ if (-not $SkipReleases) {
     [System.IO.File]::WriteAllText($notesV1Path, $notesV1, (New-Object System.Text.UTF8Encoding $false))
 
     if (Test-Path $v2exe) {
-        $asset2 = Join-Path $stage "DieCutTool-v2.0.exe"
+        $asset2 = Join-Path $stage "DieCutTool-v2.2.exe"
         Copy-Item $v2exe $asset2 -Force
-        if ((Rodar $Gh @("release", "view", "v2.0") -Silencioso) -ne 0) {
-            Rodar $Gh @("release", "create", "v2.0", $asset2, "--title", "DieCUT Tool v2.0",
+        if ((Rodar $Gh @("release", "view", "v2.2") -Silencioso) -ne 0) {
+            Rodar $Gh @("release", "create", "v2.2", $asset2, "--title", "DieCUT Tool v2.2",
                 "--notes-file", $notesV2Path, "--latest") | Out-Null
         } else {
-            Rodar $Gh @("release", "upload", "v2.0", $asset2, "--clobber") | Out-Null
+            Rodar $Gh @("release", "upload", "v2.2", $asset2, "--clobber") | Out-Null
         }
-        Write-Host "release v2.0 publicada"
+        Write-Host "release v2.2 publicada"
     } else {
-        Write-Host "aviso: $v2exe nao encontrado - release v2.0 ignorada" -ForegroundColor Yellow
+        Write-Host "aviso: $v2exe nao encontrado - release v2.2 ignorada" -ForegroundColor Yellow
     }
 
     if (Test-Path $v1exe) {
@@ -193,14 +199,14 @@ if (-not $SkipReleases) {
         Write-Host "aviso: $v1exe nao encontrado - release v1.0 ignorada" -ForegroundColor Yellow
     }
 
-    # A release v1.0 e criada depois da v2.0; o GitHub marca a mais recente como
-    # "Latest" por padrao. Forca a v2.0 como Latest para o botao principal.
-    $releaseJson = Capturar $Gh @("api", "repos/$Owner/$Repo/releases/tags/v2.0")
+    # A release v1.0 e criada depois da v2.2; o GitHub marca a mais recente como
+    # "Latest" por padrao. Forca a v2.2 como Latest para o botao principal.
+    $releaseJson = Capturar $Gh @("api", "repos/$Owner/$Repo/releases/tags/v2.2")
     if ($releaseJson) {
         $v2id = ($releaseJson | ConvertFrom-Json).id
         if ($v2id) {
             Rodar $Gh @("api", "-X", "PATCH", "repos/$Owner/$Repo/releases/$v2id", "-F", "make_latest=true") -Silencioso | Out-Null
-            Write-Host "v2.0 marcada como Latest"
+            Write-Host "v2.2 marcada como Latest"
         }
     }
 }

@@ -29,7 +29,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="DieCutTool v2.0",
+    name="DieCutTool v2.2",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

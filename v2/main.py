@@ -1,4 +1,4 @@
-"""Ponto de entrada da DieCUT Tool v2.0."""
+"""Ponto de entrada da DieCUT Tool v2.2."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def _run_selftest() -> int:
         output = Path.cwd()
     output.mkdir(parents=True, exist_ok=True)
 
-    sheet = SheetSpec(210, 297, 5)
+    sheet = SheetSpec(210, 297)
     label = LabelSpec(50, 30, 2, ShapeType.ROUNDED_RECT, 0.4)
     layout = compute_layout(sheet, label, 2, 2, LayoutSpec(3, 9, auto=True))
     pdf_path = output / "selftest.pdf"

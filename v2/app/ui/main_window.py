@@ -1,4 +1,4 @@
-"""Janela principal da DieCUT Tool v2.0."""
+"""Janela principal da DieCUT Tool v2.2."""
 
 from __future__ import annotations
 
@@ -11,7 +11,15 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from .. import geometry
-from ..exporters import export_dxf, export_pdf
+from ..cutting import (
+    STRATEGY_KEYS,
+    STRATEGY_LABELS,
+    STRATEGY_PROXIMITY,
+    STRATEGY_ZIGZAG,
+    CutPlan,
+    build_cut_plan,
+)
+from ..exporters import export_cut_plan_dxf, export_cut_plan_pdf, export_dxf, export_pdf
 from ..layout import auto_grid, compute_layout
 from ..models import (
     ALIGN_H,
@@ -30,7 +38,7 @@ from .widgets import Card, NumberSpinbox, StatusDot
 
 class MainWindow(ctk.CTk):
     APP_NAME = "DieCUT Tool"
-    VERSION = "2.0"
+    VERSION = "2.2"
 
     def __init__(self) -> None:
         super().__init__(fg_color=theme.BG)
@@ -45,10 +53,13 @@ class MainWindow(ctk.CTk):
 
         self._syncing = False
         self._refresh_job: str | None = None
+        self._cutting_job: str | None = None
         self._last_export_dir = str(Path.home())
-        self._sheet = SheetSpec(0, 0, 0)
+        self._sheet = SheetSpec(0, 0)
         self._label = LabelSpec(0, 0)
         self._layout = LayoutResult()
+        self._sim_plan: CutPlan | None = None
+        self._previous_view_mode = "2D"
 
         self._create_variables()
         self._build_layout()
@@ -62,7 +73,6 @@ class MainWindow(ctk.CTk):
     def _create_variables(self) -> None:
         self.sheet_w = ctk.StringVar(value="210")
         self.sheet_h = ctk.StringVar(value="297")
-        self.sheet_margin = ctk.StringVar(value="5")
 
         self.label_w = ctk.StringVar(value="50")
         self.label_h = ctk.StringVar(value="30")
@@ -81,7 +91,9 @@ class MainWindow(ctk.CTk):
 
         self.view_mode = ctk.StringVar(value="2D")
         self.show_grid = ctk.BooleanVar(value=True)
-        self.show_margins = ctk.BooleanVar(value=True)
+        self.sim_speed = ctk.DoubleVar(value=150.0)
+        self.cut_strategy = ctk.StringVar(value=STRATEGY_LABELS[STRATEGY_PROXIMITY])
+        self.keep_blade_down = ctk.BooleanVar(value=True)
 
     # ------------------------------------------------------------------
     #  Construção da interface
@@ -133,7 +145,7 @@ class MainWindow(ctk.CTk):
         ).pack(side="left", padx=(8, 0))
         ctk.CTkLabel(
             text_frame,
-            text="Gerador de cortantes • pré-visualização 2D/3D • exportação PDF e DXF",
+            text="Gerador de cortantes • pré-visualização 2D/3D • simulação de corte • PDF e DXF",
             font=theme.font(11),
             text_color=theme.MUTED,
         ).pack(anchor="w", pady=(2, 0))
@@ -160,13 +172,14 @@ class MainWindow(ctk.CTk):
 
         self._build_sheet_card(sidebar)
         self._build_label_card(sidebar)
+        self._build_cutting_card(sidebar)
         self._build_distribution_card(sidebar)
         self._build_alignment_card(sidebar)
         self._build_export_card(sidebar)
 
         ctk.CTkLabel(
             sidebar,
-            text="Atalhos: Ctrl+P PDF • Ctrl+D DXF • Ctrl+0 ajustar",
+            text="Atalhos: Ctrl+P PDF • Ctrl+D DXF • Ctrl+0 ajustar • F5 simulação",
             font=theme.font(9),
             text_color=theme.MUTED,
             wraplength=310,
@@ -177,7 +190,6 @@ class MainWindow(ctk.CTk):
         card.pack(fill="x", padx=12, pady=(12, 8))
         self._add_field(card.body, "Largura da folha (mm)", self.sheet_w, step=10, minimum=1)
         self._add_field(card.body, "Altura da folha (mm)", self.sheet_h, step=10, minimum=1)
-        self._add_field(card.body, "Margem de segurança (mm)", self.sheet_margin, step=1, minimum=0)
 
     def _build_label_card(self, parent) -> None:
         card = Card(parent, "Etiqueta e dieline", icon="◈")
@@ -261,7 +273,7 @@ class MainWindow(ctk.CTk):
         self.auto_switch.pack(side="right")
         ctk.CTkLabel(
             card.body,
-            text="Calcula o número máximo de etiquetas que cabem na área útil.",
+            text="Calcula o número máximo de etiquetas que cabem na folha.",
             font=theme.font(9),
             text_color=theme.MUTED,
             anchor="w",
@@ -329,6 +341,65 @@ class MainWindow(ctk.CTk):
             font=theme.font(11),
             dropdown_font=theme.font(11),
         ).pack(fill="x")
+
+    def _build_cutting_card(self, parent) -> None:
+        card = Card(parent, "Percurso de corte", icon="✂")
+        card.pack(fill="x", padx=12, pady=8)
+
+        ctk.CTkLabel(
+            card.body,
+            text="Estratégia",
+            font=theme.font(11),
+            text_color=theme.TEXT_DIM,
+        ).pack(anchor="w", pady=(2, 2))
+        self.strategy_segment = ctk.CTkSegmentedButton(
+            card.body,
+            values=list(STRATEGY_LABELS.values()),
+            variable=self.cut_strategy,
+            height=30,
+            corner_radius=8,
+            border_width=2,
+            fg_color=theme.BG,
+            selected_color=theme.ACCENT,
+            selected_hover_color=theme.ACCENT_HOVER,
+            unselected_color=theme.CARD_ALT,
+            unselected_hover_color=theme.BORDER,
+            text_color=theme.TEXT,
+            font=theme.font(11, "bold"),
+            command=self._on_cutting_option_change,
+        )
+        self.strategy_segment.pack(fill="x", pady=(0, 8))
+
+        self.blade_switch = ctk.CTkSwitch(
+            card.body,
+            text="Manter lâmina em baixo",
+            variable=self.keep_blade_down,
+            onvalue=True,
+            offvalue=False,
+            fg_color=theme.BORDER,
+            progress_color=theme.ACCENT,
+            button_color=theme.TEXT,
+            button_hover_color="#ffffff",
+            text_color=theme.TEXT_DIM,
+            font=theme.font(11),
+            command=self._on_cutting_option_change,
+        )
+        self.blade_switch.pack(anchor="w", pady=(0, 4))
+
+        ctk.CTkLabel(
+            card.body,
+            text=(
+                "Proximidade encurta os deslocamentos; zigue-zague percorre a "
+                "folha linha a linha. Os contornos que se tocam são cortados "
+                "num só percurso, sem levantar a lâmina e sem passar duas vezes "
+                "sobre a mesma aresta."
+            ),
+            font=theme.font(9),
+            text_color=theme.MUTED,
+            anchor="w",
+            justify="left",
+            wraplength=300,
+        ).pack(fill="x", pady=(4, 0))
 
     def _build_export_card(self, parent) -> None:
         card = Card(parent, "Exportar", icon="⇩")
@@ -433,24 +504,21 @@ class MainWindow(ctk.CTk):
         )
         self.grid_switch.pack(side="left", padx=(16, 0))
 
-        self.margin_switch = ctk.CTkSwitch(
+        self.sim_button = ctk.CTkButton(
             toolbar,
-            text="Margens",
-            width=88,
-            switch_width=34,
-            switch_height=18,
-            variable=self.show_margins,
-            onvalue=True,
-            offvalue=False,
-            fg_color=theme.BORDER,
-            progress_color=theme.ACCENT,
-            button_color=theme.TEXT,
-            button_hover_color="#ffffff",
-            text_color=theme.TEXT_DIM,
-            font=theme.font(10),
-            command=lambda: self.preview.set_margins(self.show_margins.get()),
+            text="▶  Simulação",
+            width=108,
+            height=30,
+            corner_radius=8,
+            fg_color=theme.CARD_ALT,
+            hover_color=theme.BORDER,
+            border_width=1,
+            border_color=theme.CYAN,
+            text_color=theme.CYAN,
+            font=theme.font(10, "bold"),
+            command=self._toggle_simulation,
         )
-        self.margin_switch.pack(side="left", padx=(10, 0))
+        self.sim_button.pack(side="left", padx=(14, 0))
 
         # Controlos de zoom à direita
         self.fit_button = ctk.CTkButton(
@@ -507,6 +575,9 @@ class MainWindow(ctk.CTk):
         self.preview = PreviewCanvas(workspace)
         self.preview.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
         self.preview.on_zoom = self._on_zoom
+        self.preview.on_simulation_update = self._on_simulation_update
+
+        self._build_simulation_bar(workspace)
 
         self.bind("<Control-p>", lambda _e: self._export_pdf())
         self.bind("<Control-d>", lambda _e: self._export_dxf())
@@ -514,6 +585,126 @@ class MainWindow(ctk.CTk):
         self.bind("<Control-plus>", lambda _e: self.preview.zoom_in())
         self.bind("<Control-equal>", lambda _e: self.preview.zoom_in())
         self.bind("<Control-minus>", lambda _e: self.preview.zoom_out())
+        self.bind("<F5>", lambda _e: self._toggle_simulation())
+
+    def _build_simulation_bar(self, workspace) -> None:
+        self.sim_bar = ctk.CTkFrame(
+            workspace,
+            fg_color=theme.CARD,
+            corner_radius=12,
+            border_width=1,
+            border_color=theme.BORDER,
+            height=58,
+        )
+        self.sim_bar.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        self.sim_bar.grid_propagate(False)
+        self.sim_bar.grid_remove()
+
+        ctk.CTkLabel(
+            self.sim_bar,
+            text="SIMULAÇÃO DE CORTE",
+            font=theme.font(10, "bold"),
+            text_color=theme.MUTED,
+        ).pack(side="left", padx=(16, 12), pady=11)
+
+        self.sim_play_button = ctk.CTkButton(
+            self.sim_bar,
+            text="⏸  Pausar",
+            width=104,
+            height=34,
+            corner_radius=8,
+            fg_color=theme.ACCENT,
+            hover_color=theme.ACCENT_HOVER,
+            text_color="#ffffff",
+            font=theme.font(11, "bold"),
+            command=lambda: self.preview.toggle_simulation(),
+        )
+        self.sim_play_button.pack(side="left", padx=(0, 6), pady=11)
+
+        self.sim_restart_button = ctk.CTkButton(
+            self.sim_bar,
+            text="⟲  Reiniciar",
+            width=98,
+            height=34,
+            corner_radius=8,
+            fg_color=theme.CARD_ALT,
+            hover_color=theme.BORDER,
+            text_color=theme.TEXT_DIM,
+            font=theme.font(11, "bold"),
+            command=lambda: self.preview.restart_simulation(),
+        )
+        self.sim_restart_button.pack(side="left", padx=(0, 10), pady=11)
+
+        self.sim_save_button = ctk.CTkButton(
+            self.sim_bar,
+            text="⤓  Guardar",
+            width=104,
+            height=34,
+            corner_radius=8,
+            fg_color=theme.CARD_ALT,
+            hover_color=theme.BORDER,
+            border_width=1,
+            border_color=theme.GREEN,
+            text_color=theme.GREEN,
+            font=theme.font(11, "bold"),
+            command=self._open_save_menu,
+        )
+        self.sim_save_button.pack(side="left", padx=(0, 16), pady=11)
+
+        speed_frame = ctk.CTkFrame(self.sim_bar, fg_color="transparent")
+        speed_frame.pack(side="left", pady=11)
+        ctk.CTkLabel(
+            speed_frame,
+            text="Velocidade",
+            font=theme.font(10),
+            text_color=theme.TEXT_DIM,
+        ).pack(side="left", padx=(0, 6))
+        self.sim_speed_slider = ctk.CTkSlider(
+            speed_frame,
+            from_=20,
+            to=900,
+            number_of_steps=88,
+            width=150,
+            height=18,
+            variable=self.sim_speed,
+            button_color=theme.CYAN,
+            button_hover_color="#7fe2f5",
+            progress_color=theme.CYAN,
+            fg_color=theme.BORDER,
+            command=self._on_sim_speed,
+        )
+        self.sim_speed_slider.pack(side="left")
+        self.sim_speed_label = ctk.CTkLabel(
+            speed_frame,
+            text="150 mm/s",
+            width=64,
+            font=theme.font(10, "bold"),
+            text_color=theme.TEXT_DIM,
+        )
+        self.sim_speed_label.pack(side="left", padx=(8, 0))
+
+        self.sim_progress_label = ctk.CTkLabel(
+            self.sim_bar,
+            text="0%",
+            width=54,
+            font=theme.font(12, "bold"),
+            text_color=theme.CYAN,
+        )
+        self.sim_progress_label.pack(side="right", padx=(0, 12))
+
+        self.sim_close_button = ctk.CTkButton(
+            self.sim_bar,
+            text="Fechar",
+            width=74,
+            height=34,
+            corner_radius=8,
+            fg_color=theme.CARD_ALT,
+            hover_color=theme.BORDER,
+            text_color=theme.TEXT_DIM,
+            font=theme.font(11, "bold"),
+            command=self._stop_simulation,
+        )
+        self.sim_close_button.pack(side="right", padx=(0, 14), pady=11)
 
     def _build_statusbar(self) -> None:
         bar = ctk.CTkFrame(self, fg_color=theme.HEADER, corner_radius=0, height=36)
@@ -589,7 +780,6 @@ class MainWindow(ctk.CTk):
         for variable in (
             self.sheet_w,
             self.sheet_h,
-            self.sheet_margin,
             self.label_h,
             self.label_radius,
             self.compensation,
@@ -645,7 +835,275 @@ class MainWindow(ctk.CTk):
     def _on_zoom(self, percent: int) -> None:
         self.zoom_label.configure(text=f"{percent}%")
 
+    # ------------------------------------------------------------------
+    #  Simulação de corte
+    # ------------------------------------------------------------------
+    def _on_cutting_text_change(self, *_args) -> None:
+        if self._syncing:
+            return
+        if self._cutting_job is not None:
+            try:
+                self.after_cancel(self._cutting_job)
+            except Exception:
+                pass
+        self._cutting_job = self.after(300, self._apply_cutting_text_change)
+
+    def _apply_cutting_text_change(self) -> None:
+        self._cutting_job = None
+        self._on_cutting_option_change()
+
+    def _on_cutting_option_change(self, _value: str | None = None) -> None:
+        """Recalcula o percurso se a simulação estiver a decorrer."""
+
+        if self.preview.simulation_active:
+            self._replan_simulation()
+
+    def _cut_plan_options(self) -> dict:
+        return {
+            "strategy": STRATEGY_KEYS.get(
+                self.cut_strategy.get(), STRATEGY_PROXIMITY
+            ),
+            "keep_blade_down": bool(self.keep_blade_down.get()),
+        }
+
+    def _replan_simulation(self) -> None:
+        if not self._simulation_ready():
+            return
+        plan = build_cut_plan(
+            self._label,
+            self._layout,
+            quality="high",
+            **self._cut_plan_options(),
+        )
+        if plan.is_empty:
+            return
+        self._sim_plan = plan
+        self.sim_progress_label.configure(text="0%")
+        self.preview.start_simulation(plan)
+        self._show_plan_status(plan, finished=False)
+
+    def _toggle_simulation(self) -> None:
+        if self.preview.simulation_active:
+            self._stop_simulation()
+        else:
+            self._start_simulation()
+
+    def _simulation_ready(self) -> bool:
+        if not self._sheet.is_valid:
+            messagebox.showwarning(
+                "Dimensões inválidas",
+                "Introduza as dimensões da folha antes de simular o corte.",
+                parent=self,
+            )
+            return False
+        if not self._label.is_valid:
+            messagebox.showwarning(
+                "Dimensões inválidas",
+                "Introduza as dimensões da etiqueta antes de simular o corte.",
+                parent=self,
+            )
+            return False
+        if self._layout.count == 0:
+            messagebox.showwarning(
+                "Nada para cortar",
+                "A etiqueta não cabe na folha com os valores atuais.",
+                parent=self,
+            )
+            return False
+        if not self._layout.fits:
+            messagebox.showwarning(
+                "Layout excede a folha",
+                self._layout.warnings[0]
+                + "\n\nReduza a quantidade de etiquetas ou o espaçamento.",
+                parent=self,
+            )
+            return False
+        return True
+
+    def _start_simulation(self) -> None:
+        if not self._simulation_ready():
+            return
+
+        self.status_label.configure(
+            text="A calcular o percurso mais curto…", text_color=theme.TEXT_DIM
+        )
+        self.update_idletasks()
+
+        plan = build_cut_plan(
+            self._label,
+            self._layout,
+            quality="high",
+            **self._cut_plan_options(),
+        )
+        if plan.is_empty:
+            messagebox.showwarning(
+                "Simulação de corte",
+                "Não foi possível gerar o percurso de corte para este layout.",
+                parent=self,
+            )
+            return
+
+        self._sim_plan = plan
+        self._previous_view_mode = self.view_mode.get()
+        self.view_segment.set("2D")
+        self.preview.set_view_mode("2D")
+        self.view_segment.configure(state="disabled")
+
+        self.sim_bar.grid()
+        self.sim_button.configure(
+            text="■  Parar",
+            fg_color=theme.ACCENT,
+            hover_color=theme.ACCENT_HOVER,
+            border_color=theme.ACCENT,
+            text_color="#ffffff",
+        )
+        self.sim_play_button.configure(text="⏸  Pausar")
+        self.sim_progress_label.configure(text="0%")
+        self.preview.start_simulation(plan)
+        self._show_plan_status(plan, finished=False)
+
+    def _show_plan_status(self, plan: CutPlan, *, finished: bool) -> None:
+        strategy = STRATEGY_LABELS.get(plan.strategy, plan.strategy)
+        lifts = f"{plan.lift_count} elevaç{'ão' if plan.lift_count == 1 else 'ões'}"
+        if finished:
+            parts = [
+                f"corte {plan.cut_length:,.0f} mm",
+            ]
+            if plan.link_count > 0:
+                parts.append(
+                    f"{plan.link_count} ligaç{'ão' if plan.link_count == 1 else 'ões'}"
+                )
+            parts.append(f"deslocamento {plan.travel_length:,.0f} mm")
+            self.status_dot.configure(text_color=theme.GREEN)
+            text = (
+                f"Simulação concluída • {strategy} • {plan.label_count} etiquetas • "
+                + " + ".join(parts)
+                + f" • {lifts}"
+            )
+        else:
+            self.status_dot.configure(text_color=theme.CYAN)
+            text = (
+                f"Simulação de corte • {strategy} • {plan.label_count} etiquetas • "
+                f"{plan.total_length:,.0f} mm • {lifts}"
+            )
+        self.status_label.configure(text=text, text_color=theme.TEXT_DIM)
+
+    def _stop_simulation(self) -> None:
+        if self._cutting_job is not None:
+            try:
+                self.after_cancel(self._cutting_job)
+            except Exception:
+                pass
+            self._cutting_job = None
+        if not self.preview.simulation_active:
+            return
+        self.preview.stop_simulation()
+        self.sim_bar.grid_remove()
+        self.view_segment.configure(state="normal")
+        previous = self._previous_view_mode
+        self.view_segment.set(previous)
+        self.preview.set_view_mode(previous)
+        self.sim_button.configure(
+            text="▶  Simulação",
+            fg_color=theme.CARD_ALT,
+            hover_color=theme.BORDER,
+            border_color=theme.CYAN,
+            text_color=theme.CYAN,
+        )
+        self.sim_progress_label.configure(text="0%")
+        self._sim_plan = None
+        self._update_status(self._sheet, self._label, self._layout)
+
+    def _on_sim_speed(self, value: float) -> None:
+        self.preview.set_simulation_speed(float(value))
+        self.sim_speed_label.configure(text=f"{float(value):.0f} mm/s")
+
+    def _open_save_menu(self) -> None:
+        if not self._sim_plan:
+            messagebox.showwarning(
+                "Sem percurso",
+                "Inicie a simulação antes de guardar o percurso otimizado.",
+                parent=self,
+            )
+            return
+
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(
+            label="DXF otimizado (plotter)",
+            command=lambda: self._save_cut_plan(".dxf"),
+        )
+        menu.add_command(
+            label="PDF otimizado (referência)",
+            command=lambda: self._save_cut_plan(".pdf"),
+        )
+        x = self.sim_save_button.winfo_rootx()
+        y = self.sim_save_button.winfo_rooty() + self.sim_save_button.winfo_height()
+        try:
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+
+    def _save_cut_plan(self, extension: str) -> None:
+        plan = self._sim_plan
+        if not plan:
+            messagebox.showwarning(
+                "Sem percurso",
+                "Inicie a simulação antes de guardar o percurso otimizado.",
+                parent=self,
+            )
+            return
+
+        filetype = "DXF" if extension == ".dxf" else "PDF"
+        base = Path(self._suggested_name(".dxf")).stem + "_corte"
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            defaultextension=extension,
+            initialfile=base + extension,
+            initialdir=self._last_export_dir,
+            filetypes=[(f"{filetype} otimizado", f"*{extension}")],
+        )
+        if not path:
+            return
+        self._last_export_dir = str(Path(path).parent)
+
+        try:
+            if extension == ".dxf":
+                export_cut_plan_dxf(path, self._sheet, plan)
+            else:
+                export_cut_plan_pdf(path, self._sheet, plan)
+        except OSError as exc:
+            messagebox.showerror("Erro ao guardar", str(exc), parent=self)
+            return
+        except Exception as exc:  # pragma: no cover - proteção da UI
+            messagebox.showerror("Erro ao guardar percurso", str(exc), parent=self)
+            return
+
+        strategy = STRATEGY_LABELS.get(plan.strategy, plan.strategy)
+        messagebox.showinfo(
+            f"{filetype} guardado",
+            (
+                f"Percurso {strategy} guardado com {plan.label_count} etiquetas, "
+                f"{plan.lift_count} elevações de lâmina e "
+                f"{plan.total_length:,.0f} mm no total:\n{path}"
+            ),
+            parent=self,
+        )
+
+    def _on_simulation_update(self, progress: float, finished: bool) -> None:
+        self.sim_progress_label.configure(text=f"{progress * 100.0:.0f}%")
+        if finished:
+            self.sim_play_button.configure(text="⟲  Repetir")
+            plan = self.preview.simulation_plan
+            if plan:
+                self._show_plan_status(plan, finished=True)
+        elif self.preview.simulation_playing:
+            self.sim_play_button.configure(text="⏸  Pausar")
+        else:
+            self.sim_play_button.configure(text="▶  Continuar")
+
     def _schedule_refresh(self) -> None:
+        if self.preview.simulation_active:
+            self._stop_simulation()
         if self._refresh_job is not None:
             self.after_cancel(self._refresh_job)
         self._refresh_job = self.after(35, self._refresh)
@@ -659,7 +1117,6 @@ class MainWindow(ctk.CTk):
         sheet = SheetSpec(
             self._value(self.sheet_w),
             self._value(self.sheet_h),
-            max(0.0, self._value(self.sheet_margin)),
         )
         shape = ShapeType(self.shape.get())
         width = self._value(self.label_w)
@@ -775,7 +1232,7 @@ class MainWindow(ctk.CTk):
             messagebox.showwarning(
                 "Layout excede a folha",
                 self._layout.warnings[0]
-                + "\n\nReduza a quantidade, o espaçamento ou a margem.",
+                + "\n\nReduza a quantidade de etiquetas ou o espaçamento.",
                 parent=self,
             )
             return False

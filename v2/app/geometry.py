@@ -224,58 +224,92 @@ def shape_area(label: LabelSpec) -> float:
     return width * height - (4.0 - math.pi) * radius * radius
 
 
-class IsoProjector:
-    """Projeção isométrica simples para a pré-visualização 3D.
+DEFAULT_YAW = 45.0
+DEFAULT_PITCH = 35.0
 
-    A escala em Z é exagerada para que a espessura da folha e o relevo das
-    etiquetas sejam visíveis no ecrã.
+
+class OrbitProjector:
+    """Projeção 3D com órbita em torno da folha.
+
+    `yaw` roda a folha na horizontal (360° sem limite) e `pitch` inclina a
+    câmara entre uma vista quase rasante e uma vista de topo. A escala em Z é
+    exagerada para que a espessura da folha e o relevo das etiquetas sejam
+    visíveis no ecrã.
     """
-
-    COS30 = math.cos(math.radians(30.0))
-    SIN30 = math.sin(math.radians(30.0))
 
     def __init__(
         self,
         scale: float,
         origin_x: float,
         origin_y: float,
-        z_factor: float = 2.4,
+        yaw: float = DEFAULT_YAW,
+        pitch: float = DEFAULT_PITCH,
+        z_factor: float = 2.6,
+        pivot: tuple[float, float, float] | None = None,
     ) -> None:
         self.scale = scale
         self.origin_x = origin_x
         self.origin_y = origin_y
+        self.yaw = yaw
+        self.pitch = pitch
         self.z_factor = z_factor
+        self.pivot = pivot or (0.0, 0.0, 0.0)
 
-    def raw(self, x: float, y: float, z: float = 0.0) -> Point:
-        sx = (x - y) * self.COS30
-        sy = (x + y) * self.SIN30 - z * self.z_factor
-        return sx, sy
+        yaw_rad = math.radians(yaw)
+        pitch_rad = math.radians(pitch)
+        cy, sy = math.cos(yaw_rad), math.sin(yaw_rad)
+        cp, sp = math.cos(pitch_rad), math.sin(pitch_rad)
+
+        # Base ortonormada da câmara: direita, cima e profundidade.
+        self.right = (cy, -sy, 0.0)
+        self.up = (-sy * sp, -cy * sp, cp)
+        self.forward = (sy * cp, cy * cp, sp)
+
+    def raw(self, x: float, y: float, z: float = 0.0) -> tuple[float, float, float]:
+        """Projeta em coordenadas de ecrã (sem escala) e devolve a profundidade."""
+
+        x -= self.pivot[0]
+        y -= self.pivot[1]
+        z = (z - self.pivot[2]) * self.z_factor
+        sx = x * self.right[0] + y * self.right[1]
+        sy = -(x * self.up[0] + y * self.up[1] + z * self.up[2])
+        depth = x * self.forward[0] + y * self.forward[1] + z * self.forward[2]
+        return sx, sy, depth
 
     def project(self, x: float, y: float, z: float = 0.0) -> Point:
-        rx, ry = self.raw(x, y, z)
-        return self.origin_x + rx * self.scale, self.origin_y + ry * self.scale
+        sx, sy, _depth = self.raw(x, y, z)
+        return self.origin_x + sx * self.scale, self.origin_y + sy * self.scale
+
+    def depth(self, x: float, y: float, z: float = 0.0) -> float:
+        return self.raw(x, y, z)[2]
 
     @staticmethod
-    def raw_bounds(
-        width: float, height: float, z_min: float, z_max: float, z_factor: float = 2.4
+    def bounds(
+        width: float,
+        height: float,
+        z_min: float,
+        z_max: float,
+        yaw: float = DEFAULT_YAW,
+        pitch: float = DEFAULT_PITCH,
+        z_factor: float = 2.6,
+        pivot: tuple[float, float, float] | None = None,
     ) -> tuple[float, float, float, float]:
-        corners = [
-            IsoProjector.raw_static(0.0, 0.0, z_min, z_factor),
-            IsoProjector.raw_static(width, 0.0, z_min, z_factor),
-            IsoProjector.raw_static(width, height, z_min, z_factor),
-            IsoProjector.raw_static(0.0, height, z_min, z_factor),
-            IsoProjector.raw_static(0.0, 0.0, z_max, z_factor),
-            IsoProjector.raw_static(width, 0.0, z_max, z_factor),
-            IsoProjector.raw_static(width, height, z_max, z_factor),
-            IsoProjector.raw_static(0.0, height, z_max, z_factor),
-        ]
-        xs = [p[0] for p in corners]
-        ys = [p[1] for p in corners]
-        return min(xs), min(ys), max(xs), max(ys)
+        """Limites em ecrã dos oito cantos da folha, para o auto-ajuste."""
 
-    @staticmethod
-    def raw_static(x: float, y: float, z: float, z_factor: float = 2.4) -> Point:
-        return (
-            (x - y) * IsoProjector.COS30,
-            (x + y) * IsoProjector.SIN30 - z * z_factor,
-        )
+        if pivot is None:
+            pivot = (width / 2.0, height / 2.0, (z_min + z_max) / 2.0)
+        projector = OrbitProjector(1.0, 0.0, 0.0, yaw, pitch, z_factor, pivot)
+        corners = [
+            (0.0, 0.0, z_min),
+            (width, 0.0, z_min),
+            (width, height, z_min),
+            (0.0, height, z_min),
+            (0.0, 0.0, z_max),
+            (width, 0.0, z_max),
+            (width, height, z_max),
+            (0.0, height, z_max),
+        ]
+        projected = [projector.project(*corner) for corner in corners]
+        xs = [point[0] for point in projected]
+        ys = [point[1] for point in projected]
+        return min(xs), min(ys), max(xs), max(ys)
