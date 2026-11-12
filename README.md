@@ -94,7 +94,7 @@ não é preciso instalar Python nem dependências.
 | **v2.0** | `DieCutTool-v2.0.exe` | ~36 MB | Versão anterior: interface nova, 2D/3D, DXF e modo automático |
 | **v1.0** | `DieCutTool-v1.0.exe` | ~30 MB | Versão original (legado), mantida para compatibilidade |
 
-> O código-fonte atual está em **`v2/`** e corresponde à **v2.2**. O executável
+> O código-fonte atual está em **`app/`** e corresponde à **v2.2**. O executável
 > publicado já inclui todas as funcionalidades descritas acima.
 
 > O Windows pode exibir o aviso do SmartScreen porque o executável não é assinado
@@ -104,8 +104,9 @@ não é preciso instalar Python nem dependências.
 
 Requisitos: Python 3.10+ no Windows.
 
+A partir da raiz do repositório:
+
 ```powershell
-cd v2
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe main.py
@@ -114,7 +115,6 @@ python -m venv .venv
 ### Testes
 
 ```powershell
-cd v2
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
@@ -125,32 +125,44 @@ em serpentina e a exportação real para PDF/DXF (validada com `ezdxf`).
 ### Gerar o executável
 
 ```powershell
-cd v2
 .\.venv\Scripts\python.exe -m pip install pyinstaller
-.\.venv\Scripts\pyinstaller.exe --noconfirm DieCutTool_v2.spec
+.\.venv\Scripts\pyinstaller.exe --noconfirm --clean DieCutTool.spec
 ```
 
-O resultado fica em `v2/dist/DieCutTool v2.2.exe`.
+O resultado fica em `dist/DieCutTool v2.2.exe`. Também pode usar
+`.\scripts\build.ps1`.
 
 ## Estrutura do repositório
 
 ```text
 .
-├── v2/                     # versão atual (aplicação ativa)
-│   ├── main.py
-│   ├── app/                # models, geometry, layout, cutting, exporters, ui/
-│   ├── tests/              # testes do núcleo
-│   ├── assets/             # ícones
-│   └── DieCutTool_v2.spec  # build PyInstaller
-├── _legacy/
-│   └── v1/                 # versão 1 arquivada (não é usada pela v2)
-└── docs/screenshots/       # imagens deste README
+├── main.py                  # entrada da aplicação
+├── app/                     # código da aplicação
+│   ├── models.py            # folha, etiqueta, layout e compensação
+│   ├── geometry.py          # contornos, áreas e projeção 3D
+│   ├── layout.py            # modo automático e posicionamento
+│   ├── cutting.py           # estratégias de percurso e plano de corte
+│   ├── exporters.py         # PDF/DXF das dielines e do percurso
+│   ├── resources.py         # recursos em dev e no executável
+│   └── ui/                  # janela, pré-visualização e widgets
+├── assets/                  # ícones
+├── tests/                   # testes do núcleo
+├── tools/                   # gerador do ícone
+├── docs/                    # documentação e capturas de ecrã
+├── scripts/                 # build e publicação
+├── legacy/                  # versão 1 arquivada (não usada pela aplicação)
+├── requirements.txt
+├── requirements.lock.txt
+├── DieCutTool.spec          # build PyInstaller
+└── README.md
 ```
 
 **v1 × v2:** a v1 é um aplicativo único em Tkinter (`FlowCutApp`, `LayoutCalculator`),
-mantido em `_legacy/` apenas como histórico e para download. Todo o desenvolvimento
-acontece na `v2`, modular (`app/models.py`, `geometry.py`, `layout.py`, `exporters.py`, `ui/`)
-e sem qualquer dependência da v1.
+mantido em `legacy/` apenas como histórico e para download. Todo o desenvolvimento
+acontece na versão atual, modular (`app/models.py`, `geometry.py`, `layout.py`,
+`cutting.py`, `exporters.py`, `ui/`) e sem qualquer dependência da v1.
+
+Documentação técnica e instruções de build: [`docs/development.md`](docs/development.md).
 
 ## Licença
 

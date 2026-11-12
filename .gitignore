@@ -5,6 +5,11 @@ __pycache__/
 .venv/
 venv/
 env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # PyInstaller (saida regeneravel a partir do .spec)
 build/
@@ -19,7 +24,9 @@ dist/
 # Sistema
 Thumbs.db
 desktop.ini
+.DS_Store
 
 # Artefatos locais de teste/exportacao
 *.tmp
-v2/selftest.*
+*.log
+selftest.*

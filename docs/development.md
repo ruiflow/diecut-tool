@@ -1,9 +1,9 @@
-# DieCUT Tool v2.2
+# Desenvolvimento — DieCUT Tool v2.2
 
 Gerador de cortantes (dielines) para etiquetas em folhas autocolantes.
 Esta versão nasce da v1 e implementa as melhorias planeadas para a linha 2.x.
 
-![Pré-visualização](assets/icon.png)
+![Pré-visualização](../assets/icon.png)
 
 ## O que há de novo na v2.2
 
@@ -34,8 +34,9 @@ Esta versão nasce da v1 e implementa as melhorias planeadas para a linha 2.x.
 
 Requisitos: Python 3.10 ou superior.
 
+A partir da raiz do repositório:
+
 ```powershell
-cd "DieCUT Tool - Gerador de cortantes\v2"
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe main.py
@@ -63,17 +64,23 @@ python main.py --selftest .\saida_teste
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install pyinstaller
-.\.venv\Scripts\pyinstaller.exe --noconfirm DieCutTool_v2.spec
+.\.venv\Scripts\pyinstaller.exe --noconfirm --clean DieCutTool.spec
 ```
 
 O executável fica em `dist/DieCutTool v2.2.exe`.
 
+Também pode usar o script de build:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
+```
+
 ## Estrutura
 
 ```text
-v2/
+.
 ├── main.py                  # entrada da aplicação
-├── app/
+├── app/                     # código da aplicação
 │   ├── models.py            # folha, etiqueta, layout, compensação
 │   ├── geometry.py          # contornos, áreas e projeção 3D com órbita
 │   ├── layout.py            # modo automático e posicionamento
@@ -88,9 +95,12 @@ v2/
 ├── assets/                  # ícones
 ├── tests/                   # testes do núcleo
 ├── tools/make_icon.py       # gerador do ícone
+├── docs/                    # documentação e capturas de ecrã
+├── scripts/                 # automação de build e publicação
+├── legacy/                  # versão 1 arquivada (não usada pela aplicação)
 ├── requirements.txt
 ├── requirements.lock.txt
-└── DieCutTool_v2.spec
+└── DieCutTool.spec
 ```
 
 ## Notas de utilização

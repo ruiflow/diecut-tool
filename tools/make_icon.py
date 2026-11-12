@@ -1,4 +1,4 @@
-"""Gera o ícone da aplicação (executar a partir da pasta v2)."""
+"""Gera o ícone da aplicação (executar a partir da raiz do projeto)."""
 
 from __future__ import annotations
 

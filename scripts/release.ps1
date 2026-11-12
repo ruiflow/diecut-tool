@@ -10,10 +10,10 @@
     Se estiverem instalados no sistema (PATH), este script usa essas versoes.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\publicar.ps1
+    powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\publicar.ps1 -Repo diecut-tool -Visibility private
+    powershell -ExecutionPolicy Bypass -File .\scripts\release.ps1 -Repo diecut-tool -Visibility private
 #>
 [CmdletBinding()]
 param(
@@ -24,7 +24,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Set-Location -Path $PSScriptRoot
+Set-Location -Path (Split-Path $PSScriptRoot -Parent)
 
 function Passo($texto) { Write-Host "`n==> $texto" -ForegroundColor Cyan }
 function Falhar($texto) { Write-Host "ERRO: $texto" -ForegroundColor Red; exit 1 }
@@ -134,8 +134,8 @@ Rodar $Gh @("repo", "edit", "$Owner/$Repo",
 # --- 5. Releases com os .exe ---------------------------------------------
 if (-not $SkipReleases) {
     Passo "Criando as releases com os executaveis"
-    $v2exe = "v2\dist\DieCutTool v2.2.exe"
-    $v1exe = "_legacy\v1\dist\DieCutTool v1.0.exe"
+    $appExe = "dist\DieCutTool v2.2.exe"
+    $legacyExe = "legacy\v1\dist\DieCutTool v1.0.exe"
     $stage = Join-Path $env:TEMP "diecut-release"
     New-Item -ItemType Directory -Force $stage | Out-Null
 
@@ -163,7 +163,7 @@ if (-not $SkipReleases) {
     $notesV1 = @(
         "Versao original do DieCUT Tool, em arquivo unico (Tkinter: FlowCutApp, LayoutCalculator).",
         "",
-        "Mantida como legado para download e consulta. O desenvolvimento continua na v2."
+        "Mantida como legado para download e consulta. O desenvolvimento continua na versão atual."
     ) -join "`n"
 
     $notesV2Path = Join-Path $stage "notas-v2.md"
@@ -171,32 +171,32 @@ if (-not $SkipReleases) {
     [System.IO.File]::WriteAllText($notesV2Path, $notesV2, (New-Object System.Text.UTF8Encoding $false))
     [System.IO.File]::WriteAllText($notesV1Path, $notesV1, (New-Object System.Text.UTF8Encoding $false))
 
-    if (Test-Path $v2exe) {
-        $asset2 = Join-Path $stage "DieCutTool-v2.2.exe"
-        Copy-Item $v2exe $asset2 -Force
+    if (Test-Path $appExe) {
+        $appAsset = Join-Path $stage "DieCutTool-v2.2.exe"
+        Copy-Item $appExe $appAsset -Force
         if ((Rodar $Gh @("release", "view", "v2.2") -Silencioso) -ne 0) {
-            Rodar $Gh @("release", "create", "v2.2", $asset2, "--title", "DieCUT Tool v2.2",
+            Rodar $Gh @("release", "create", "v2.2", $appAsset, "--title", "DieCUT Tool v2.2",
                 "--notes-file", $notesV2Path, "--latest") | Out-Null
         } else {
-            Rodar $Gh @("release", "upload", "v2.2", $asset2, "--clobber") | Out-Null
+            Rodar $Gh @("release", "upload", "v2.2", $appAsset, "--clobber") | Out-Null
         }
         Write-Host "release v2.2 publicada"
     } else {
-        Write-Host "aviso: $v2exe nao encontrado - release v2.2 ignorada" -ForegroundColor Yellow
+        Write-Host "aviso: $appExe nao encontrado - release v2.2 ignorada" -ForegroundColor Yellow
     }
 
-    if (Test-Path $v1exe) {
-        $asset1 = Join-Path $stage "DieCutTool-v1.0.exe"
-        Copy-Item $v1exe $asset1 -Force
+    if (Test-Path $legacyExe) {
+        $legacyAsset = Join-Path $stage "DieCutTool-v1.0.exe"
+        Copy-Item $legacyExe $legacyAsset -Force
         if ((Rodar $Gh @("release", "view", "v1.0") -Silencioso) -ne 0) {
-            Rodar $Gh @("release", "create", "v1.0", $asset1, "--title", "DieCUT Tool v1.0 (legado)",
+            Rodar $Gh @("release", "create", "v1.0", $legacyAsset, "--title", "DieCUT Tool v1.0 (legado)",
                 "--notes-file", $notesV1Path, "--latest=false") | Out-Null
         } else {
-            Rodar $Gh @("release", "upload", "v1.0", $asset1, "--clobber") | Out-Null
+            Rodar $Gh @("release", "upload", "v1.0", $legacyAsset, "--clobber") | Out-Null
         }
         Write-Host "release v1.0 publicada"
     } else {
-        Write-Host "aviso: $v1exe nao encontrado - release v1.0 ignorada" -ForegroundColor Yellow
+        Write-Host "aviso: $legacyExe nao encontrado - release v1.0 ignorada" -ForegroundColor Yellow
     }
 
     # A release v1.0 e criada depois da v2.2; o GitHub marca a mais recente como
