@@ -11,6 +11,7 @@ import customtkinter as ctk
 
 from .. import geometry
 from ..cutting import KIND_CUT, STRATEGY_LABELS, CutPlan
+from ..importers.document import ImportedDocument
 from ..models import LabelSpec, LayoutResult, SheetSpec
 from . import theme
 
@@ -74,6 +75,7 @@ class PreviewCanvas(ctk.CTkFrame):
         self.sheet: SheetSpec | None = None
         self.label: LabelSpec | None = None
         self.layout: LayoutResult | None = None
+        self.document: ImportedDocument | None = None
         self.spacing_h = 2.0
         self.spacing_v = 2.0
         self.auto_mode = False
@@ -142,9 +144,26 @@ class PreviewCanvas(ctk.CTkFrame):
         self.sheet = sheet
         self.label = label
         self.layout = layout
+        self.document = None
         self.spacing_h = spacing_h
         self.spacing_v = spacing_v
         self.auto_mode = auto
+        if self.auto_fit:
+            self.fit(redraw=False)
+        self.redraw()
+
+    def update_document(self, document: ImportedDocument) -> None:
+        """Mostra um documento importado no lugar do layout de etiquetas."""
+
+        if self.simulation_active:
+            self.stop_simulation()
+        self.document = document
+        self.sheet = document.sheet
+        self.label = None
+        self.layout = None
+        self.spacing_h = 0.0
+        self.spacing_v = 0.0
+        self.auto_mode = False
         if self.auto_fit:
             self.fit(redraw=False)
         self.redraw()
@@ -428,6 +447,8 @@ class PreviewCanvas(ctk.CTkFrame):
             self._draw_simulation(cw, ch)
         elif self.view_mode == "3D":
             self._draw_3d(cw, ch)
+        elif self.document is not None:
+            self._draw_document_2d(cw, ch)
         else:
             self._draw_2d(cw, ch)
         self._emit_zoom()
@@ -486,6 +507,9 @@ class PreviewCanvas(ctk.CTkFrame):
 
     # ---------------------------------------------------------------- 2D
     def _draw_2d(self, cw: int, ch: int, simulation: bool = False) -> None:
+        if self.document is not None:
+            self._draw_document_2d(cw, ch, simulation=simulation)
+            return
         if not self.sheet or not self.label or not self.layout:
             return
         sheet = self.sheet
@@ -549,6 +573,67 @@ class PreviewCanvas(ctk.CTkFrame):
         else:
             info = f"{sheet.width:g} × {sheet.height:g} mm"
             if layout.count > PREVIEW_MAX_LABELS:
+                info += "   •   pré-visualização parcial"
+        self._draw_info(info, ox, min(ch - 14, oy + sh + 16))
+
+    def _draw_document_2d(
+        self, cw: int, ch: int, *, simulation: bool = False
+    ) -> None:
+        document = self.document
+        if not document or not self.sheet:
+            return
+        sheet = self.sheet
+        sc = self.scale
+        ox, oy = self.origin_x, self.origin_y
+        sw = sheet.width * sc
+        sh = sheet.height * sc
+
+        self.canvas.create_rectangle(
+            ox + 7, oy + 9, ox + sw + 7, oy + sh + 9,
+            fill="#05070a", outline="", stipple="gray50",
+        )
+        self.canvas.create_rectangle(
+            ox, oy, ox + sw, oy + sh,
+            fill=theme.SHEET, outline=theme.SHEET_LINE, width=1,
+        )
+
+        if self.show_grid:
+            self._draw_grid_2d(ox, oy, sw, sh, sc)
+
+        count = document.path_count
+        line_width = 2 if count <= 300 else 1
+        color = "#b6becd" if simulation else theme.ACCENT
+        for imported in document.paths[:PREVIEW_MAX_LABELS]:
+            if len(imported.points) < 2:
+                continue
+            points = [(ox + px * sc, oy + py * sc) for px, py in imported.points]
+            if imported.closed:
+                points.append(points[0])
+            self._line(points, fill=color, width=line_width)
+
+        if simulation:
+            self._draw_sim_planned_route()
+
+        self._clip_outside_sheet_2d(ox, oy, sw, sh)
+
+        if simulation and self._sim_plan:
+            plan = self._sim_plan
+            info = (
+                f"{document.title}   •   "
+                f"{STRATEGY_LABELS.get(plan.strategy, plan.strategy)}   •   "
+                f"corte {plan.cut_length:,.0f} mm   •   "
+                f"{plan.lift_count} elevaç"
+                f"{'ão' if plan.lift_count == 1 else 'ões'}   •   "
+                f"{plan.label_count} caminhos"
+            )
+            if plan.truncated:
+                info += "   •   simulação parcial"
+        else:
+            info = (
+                f"{document.title}   •   {count} caminhos   •   "
+                f"{sheet.width:g} × {sheet.height:g} mm"
+            )
+            if count > PREVIEW_MAX_LABELS:
                 info += "   •   pré-visualização parcial"
         self._draw_info(info, ox, min(ch - 14, oy + sh + 16))
 
@@ -803,26 +888,9 @@ class PreviewCanvas(ctk.CTkFrame):
         return self.origin_x + point[0] * self.scale, self.origin_y + point[1] * self.scale
 
     # ---------------------------------------------------------------- 3D
-    def _draw_3d(self, cw: int, ch: int) -> None:
-        if not self.sheet or not self.label or not self.layout:
-            return
-        sheet = self.sheet
-        label = self.label
-        layout = self.layout
-        top = THICKNESS_MM
-        z_max = top + LABEL_LIFT_MM
-        pivot = (sheet.width / 2.0, sheet.height / 2.0, (top + z_max) / 2.0)
-        proj = geometry.OrbitProjector(
-            self.scale,
-            self.origin_x,
-            self.origin_y,
-            self.yaw,
-            self.pitch,
-            Z_FACTOR,
-            pivot,
-        )
+    def _draw_sheet_3d(self, sheet: SheetSpec, top: float, proj) -> None:
+        """Desenha a folha em perspetiva (faces laterais, topo e grelha)."""
 
-        # Faces laterais viradas para a câmara.
         if abs(proj.forward[0]) > 1e-6:
             side_x = sheet.width if proj.forward[0] > 0 else 0.0
             self._polygon(
@@ -865,6 +933,30 @@ class PreviewCanvas(ctk.CTkFrame):
 
         if self.show_grid:
             self._draw_grid_3d(proj, top)
+
+    def _draw_3d(self, cw: int, ch: int) -> None:
+        if self.document is not None:
+            self._draw_document_3d(cw, ch)
+            return
+        if not self.sheet or not self.label or not self.layout:
+            return
+        sheet = self.sheet
+        label = self.label
+        layout = self.layout
+        top = THICKNESS_MM
+        z_max = top + LABEL_LIFT_MM
+        pivot = (sheet.width / 2.0, sheet.height / 2.0, (top + z_max) / 2.0)
+        proj = geometry.OrbitProjector(
+            self.scale,
+            self.origin_x,
+            self.origin_y,
+            self.yaw,
+            self.pitch,
+            Z_FACTOR,
+            pivot,
+        )
+
+        self._draw_sheet_3d(sheet, top, proj)
 
         # Etiquetas: longe -> perto para oclusão correta.
         order = sorted(
@@ -923,6 +1015,45 @@ class PreviewCanvas(ctk.CTkFrame):
         )
         if layout.count > PREVIEW_MAX_LABELS:
             info += "   •   pré-visualização parcial"
+        self._draw_info(info, 18, ch - 18)
+
+    def _draw_document_3d(self, cw: int, ch: int) -> None:
+        document = self.document
+        if not document or not self.sheet:
+            return
+        sheet = self.sheet
+        top = THICKNESS_MM
+        z_max = top + LABEL_LIFT_MM
+        pivot = (sheet.width / 2.0, sheet.height / 2.0, (top + z_max) / 2.0)
+        proj = geometry.OrbitProjector(
+            self.scale,
+            self.origin_x,
+            self.origin_y,
+            self.yaw,
+            self.pitch,
+            Z_FACTOR,
+            pivot,
+        )
+
+        self._draw_sheet_3d(sheet, top, proj)
+
+        for imported in document.paths[:PREVIEW_MAX_LABELS]:
+            if len(imported.points) < 2:
+                continue
+            points = [
+                proj.project(px, py, z_max + 0.02) for px, py in imported.points
+            ]
+            if imported.closed:
+                points.append(points[0])
+            if not self._visible(points, cw, ch):
+                continue
+            self._line(points, fill=theme.ACCENT, width=1)
+
+        info = (
+            f"{document.title}   •   {document.path_count} caminhos   •   "
+            f"{sheet.width:g} × {sheet.height:g} mm   •   "
+            "arraste com o botão esquerdo para rodar"
+        )
         self._draw_info(info, 18, ch - 18)
 
     def _draw_grid_3d(self, proj: geometry.OrbitProjector, z: float) -> None:

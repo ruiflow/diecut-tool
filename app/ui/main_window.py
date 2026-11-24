@@ -1,4 +1,4 @@
-"""Janela principal da DieCUT Tool v3."""
+"""Janela principal da DieCUT Tool v4."""
 
 from __future__ import annotations
 
@@ -12,14 +12,31 @@ import customtkinter as ctk
 
 from .. import geometry
 from ..cutting import (
+    DEFAULT_START,
+    OBJECTIVE_DISTANCE,
+    OBJECTIVE_KEYS,
+    OBJECTIVE_LABELS,
+    START_KEYS,
+    START_LABELS,
     STRATEGY_KEYS,
     STRATEGY_LABELS,
     STRATEGY_PROXIMITY,
     STRATEGY_ZIGZAG,
     CutPlan,
     build_cut_plan,
+    build_imported_cut_plan,
+    compare_imported_strategies,
+    compare_strategies,
 )
-from ..exporters import export_cut_plan_dxf, export_cut_plan_pdf, export_dxf, export_pdf
+from ..exporters import (
+    export_cut_plan_dxf,
+    export_cut_plan_pdf,
+    export_document_dxf,
+    export_document_pdf,
+    export_dxf,
+    export_pdf,
+)
+from ..importers import ImportedDocument
 from ..layout import auto_grid, compute_layout
 from ..models import (
     ALIGN_H,
@@ -32,13 +49,16 @@ from ..models import (
 )
 from ..resources import asset_path
 from . import theme
+from .about import show_about
+from .compare_dialog import CompareDialog
+from .import_dialog import ImportDialog
 from .preview import PreviewCanvas
 from .widgets import Card, NumberSpinbox, StatusDot
 
 
 class MainWindow(ctk.CTk):
     APP_NAME = "DieCUT Tool"
-    VERSION = "3"
+    VERSION = "4"
 
     def __init__(self) -> None:
         super().__init__(fg_color=theme.BG)
@@ -58,7 +78,9 @@ class MainWindow(ctk.CTk):
         self._sheet = SheetSpec(0, 0)
         self._label = LabelSpec(0, 0)
         self._layout = LayoutResult()
+        self._document: ImportedDocument | None = None
         self._sim_plan: CutPlan | None = None
+        self._comparison: list[tuple[str, CutPlan]] = []
         self._previous_view_mode = "2D"
 
         self._create_variables()
@@ -93,6 +115,8 @@ class MainWindow(ctk.CTk):
         self.show_grid = ctk.BooleanVar(value=True)
         self.sim_speed = ctk.DoubleVar(value=150.0)
         self.cut_strategy = ctk.StringVar(value=STRATEGY_LABELS[STRATEGY_PROXIMITY])
+        self.cut_objective = ctk.StringVar(value=OBJECTIVE_LABELS[OBJECTIVE_DISTANCE])
+        self.cut_start = ctk.StringVar(value=START_LABELS[DEFAULT_START])
         self.keep_blade_down = ctk.BooleanVar(value=True)
 
     # ------------------------------------------------------------------
@@ -150,13 +174,58 @@ class MainWindow(ctk.CTk):
             text_color=theme.MUTED,
         ).pack(anchor="w", pady=(2, 0))
 
+        self.import_banner = ctk.CTkFrame(
+            header,
+            fg_color=theme.CYAN_DARK,
+            corner_radius=9,
+            height=38,
+        )
+        self.import_banner.grid(row=0, column=2, sticky="e", padx=10, pady=19)
+        self.import_banner.grid_propagate(False)
+        self.import_banner_label = ctk.CTkLabel(
+            self.import_banner,
+            text="",
+            font=theme.font(10, "bold"),
+            text_color=theme.CYAN,
+        )
+        self.import_banner_label.pack(side="left", padx=(12, 8))
+        ctk.CTkButton(
+            self.import_banner,
+            text="Fechar importação",
+            width=116,
+            height=26,
+            corner_radius=7,
+            fg_color=theme.CARD_ALT,
+            hover_color=theme.BORDER,
+            text_color=theme.TEXT_DIM,
+            font=theme.font(9, "bold"),
+            command=self._close_import,
+        ).pack(side="left", padx=(0, 8))
+        self.import_banner.grid_remove()
+
+        self.about_button = ctk.CTkButton(
+            header,
+            text="Acerca",
+            width=74,
+            height=30,
+            corner_radius=8,
+            fg_color=theme.CARD_ALT,
+            hover_color=theme.BORDER,
+            border_width=1,
+            border_color=theme.BORDER,
+            text_color=theme.TEXT_DIM,
+            font=theme.font(10, "bold"),
+            command=lambda: show_about(self),
+        )
+        self.about_button.grid(row=0, column=3, padx=(0, 10), sticky="e")
+
         self.header_info = ctk.CTkLabel(
             header,
             text="",
             font=theme.font(12, "bold"),
             text_color=theme.TEXT_DIM,
         )
-        self.header_info.grid(row=0, column=3, padx=24, sticky="e")
+        self.header_info.grid(row=0, column=4, padx=(0, 24), sticky="e")
 
     def _build_sidebar(self) -> None:
         sidebar = ctk.CTkScrollableFrame(
@@ -170,6 +239,7 @@ class MainWindow(ctk.CTk):
         sidebar.grid(row=1, column=0, sticky="nsew")
         self.sidebar = sidebar
 
+        self._build_file_card(sidebar)
         self._build_sheet_card(sidebar)
         self._build_label_card(sidebar)
         self._build_cutting_card(sidebar)
@@ -179,11 +249,58 @@ class MainWindow(ctk.CTk):
 
         ctk.CTkLabel(
             sidebar,
-            text="Atalhos: Ctrl+P PDF • Ctrl+D DXF • Ctrl+0 ajustar • F5 simulação",
+            text=(
+                "Atalhos: Ctrl+P PDF • Ctrl+D DXF • Ctrl+I importar • "
+                "Ctrl+0 ajustar • F5 simulação • F1 acerca"
+            ),
             font=theme.font(9),
             text_color=theme.MUTED,
             wraplength=310,
         ).pack(pady=(2, 16), padx=20)
+
+    def _build_file_card(self, parent) -> None:
+        card = Card(parent, "Ficheiro", icon="⌸")
+        card.pack(fill="x", padx=12, pady=(12, 8))
+
+        self.import_button = ctk.CTkButton(
+            card.body,
+            text="Importar DXF/PDF",
+            height=36,
+            corner_radius=9,
+            fg_color=theme.CARD_ALT,
+            hover_color=theme.BORDER,
+            border_width=1,
+            border_color=theme.CYAN,
+            text_color=theme.CYAN,
+            font=theme.font(12, "bold"),
+            command=self._import_file,
+        )
+        self.import_button.pack(fill="x", pady=(2, 6))
+
+        self.close_import_button = ctk.CTkButton(
+            card.body,
+            text="Fechar importação",
+            height=32,
+            corner_radius=9,
+            fg_color=theme.CARD_ALT,
+            hover_color=theme.BORDER,
+            text_color=theme.TEXT_DIM,
+            font=theme.font(11, "bold"),
+            command=self._close_import,
+            state="disabled",
+        )
+        self.close_import_button.pack(fill="x")
+
+        self.file_info = ctk.CTkLabel(
+            card.body,
+            text="Sem documento importado.",
+            font=theme.font(9),
+            text_color=theme.MUTED,
+            anchor="w",
+            justify="left",
+            wraplength=300,
+        )
+        self.file_info.pack(fill="x", pady=(6, 0))
 
     def _build_sheet_card(self, parent) -> None:
         card = Card(parent, "Formato da folha", icon="▤")
@@ -352,27 +469,84 @@ class MainWindow(ctk.CTk):
             font=theme.font(11),
             text_color=theme.TEXT_DIM,
         ).pack(anchor="w", pady=(2, 2))
-        self.strategy_segment = ctk.CTkSegmentedButton(
+        self.strategy_combo = ctk.CTkComboBox(
             card.body,
             values=list(STRATEGY_LABELS.values()),
             variable=self.cut_strategy,
-            height=30,
+            state="readonly",
+            height=32,
             corner_radius=8,
-            border_width=2,
             fg_color=theme.BG,
-            selected_color=theme.ACCENT,
-            selected_hover_color=theme.ACCENT_HOVER,
-            unselected_color=theme.CARD_ALT,
-            unselected_hover_color=theme.BORDER,
+            border_color=theme.BORDER,
+            button_color=theme.CARD_ALT,
+            button_hover_color=theme.BORDER,
+            dropdown_fg_color=theme.CARD_ALT,
+            dropdown_hover_color=theme.BORDER,
+            dropdown_text_color=theme.TEXT,
             text_color=theme.TEXT,
             font=theme.font(11, "bold"),
-            command=self._on_cutting_option_change,
+            dropdown_font=theme.font(11),
+            command=lambda _value: self._on_cutting_option_change(),
         )
-        self.strategy_segment.pack(fill="x", pady=(0, 8))
+        self.strategy_combo.pack(fill="x", pady=(0, 8))
+
+        ctk.CTkLabel(
+            card.body,
+            text="Objetivo",
+            font=theme.font(11),
+            text_color=theme.TEXT_DIM,
+        ).pack(anchor="w", pady=(2, 2))
+        self.objective_combo = ctk.CTkComboBox(
+            card.body,
+            values=list(OBJECTIVE_LABELS.values()),
+            variable=self.cut_objective,
+            state="readonly",
+            height=32,
+            corner_radius=8,
+            fg_color=theme.BG,
+            border_color=theme.BORDER,
+            button_color=theme.CARD_ALT,
+            button_hover_color=theme.BORDER,
+            dropdown_fg_color=theme.CARD_ALT,
+            dropdown_hover_color=theme.BORDER,
+            dropdown_text_color=theme.TEXT,
+            text_color=theme.TEXT,
+            font=theme.font(11),
+            dropdown_font=theme.font(11),
+            command=lambda _value: self._on_cutting_option_change(),
+        )
+        self.objective_combo.pack(fill="x", pady=(0, 8))
+
+        ctk.CTkLabel(
+            card.body,
+            text="Início do percurso",
+            font=theme.font(11),
+            text_color=theme.TEXT_DIM,
+        ).pack(anchor="w", pady=(2, 2))
+        self.start_combo = ctk.CTkComboBox(
+            card.body,
+            values=list(START_LABELS.values()),
+            variable=self.cut_start,
+            state="readonly",
+            height=32,
+            corner_radius=8,
+            fg_color=theme.BG,
+            border_color=theme.BORDER,
+            button_color=theme.CARD_ALT,
+            button_hover_color=theme.BORDER,
+            dropdown_fg_color=theme.CARD_ALT,
+            dropdown_hover_color=theme.BORDER,
+            dropdown_text_color=theme.TEXT,
+            text_color=theme.TEXT,
+            font=theme.font(11),
+            dropdown_font=theme.font(11),
+            command=lambda _value: self._on_cutting_option_change(),
+        )
+        self.start_combo.pack(fill="x", pady=(0, 8))
 
         self.blade_switch = ctk.CTkSwitch(
             card.body,
-            text="Manter lâmina em baixo",
+            text="Fundir contornos",
             variable=self.keep_blade_down,
             onvalue=True,
             offvalue=False,
@@ -389,17 +563,34 @@ class MainWindow(ctk.CTk):
         ctk.CTkLabel(
             card.body,
             text=(
-                "Proximidade encurta os deslocamentos; zigue-zague percorre a "
-                "folha linha a linha. Os contornos que se tocam são cortados "
-                "num só percurso, sem levantar a lâmina e sem passar duas vezes "
-                "sobre a mesma aresta."
+                "Proximidade+ encurta os deslocamentos; zigue-zague percorre a "
+                "folha linha a linha; colunas e espiral oferecem percursos "
+                "alternativos. O objetivo define qual percurso é recomendado "
+                "em “Comparar percursos”. Com “Fundir contornos”, os contornos "
+                "que se tocam são cortados num só percurso, sem levantar a "
+                "lâmina e sem passar duas vezes sobre a mesma aresta."
             ),
             font=theme.font(9),
             text_color=theme.MUTED,
             anchor="w",
             justify="left",
             wraplength=300,
-        ).pack(fill="x", pady=(4, 0))
+        ).pack(fill="x", pady=(4, 8))
+
+        self.compare_button = ctk.CTkButton(
+            card.body,
+            text="Comparar percursos",
+            height=34,
+            corner_radius=9,
+            fg_color=theme.CARD_ALT,
+            hover_color=theme.BORDER,
+            border_width=1,
+            border_color=theme.GREEN,
+            text_color=theme.GREEN,
+            font=theme.font(11, "bold"),
+            command=self._compare_plans,
+        )
+        self.compare_button.pack(fill="x")
 
     def _build_export_card(self, parent) -> None:
         card = Card(parent, "Exportar", icon="⇩")
@@ -581,11 +772,13 @@ class MainWindow(ctk.CTk):
 
         self.bind("<Control-p>", lambda _e: self._export_pdf())
         self.bind("<Control-d>", lambda _e: self._export_dxf())
+        self.bind("<Control-i>", lambda _e: self._import_file())
         self.bind("<Control-0>", lambda _e: self.preview.fit())
         self.bind("<Control-plus>", lambda _e: self.preview.zoom_in())
         self.bind("<Control-equal>", lambda _e: self.preview.zoom_in())
         self.bind("<Control-minus>", lambda _e: self.preview.zoom_out())
         self.bind("<F5>", lambda _e: self._toggle_simulation())
+        self.bind("<F1>", lambda _e: show_about(self))
 
     def _build_simulation_bar(self, workspace) -> None:
         self.sim_bar = ctk.CTkFrame(
@@ -836,6 +1029,88 @@ class MainWindow(ctk.CTk):
         self.zoom_label.configure(text=f"{percent}%")
 
     # ------------------------------------------------------------------
+    #  Importação
+    # ------------------------------------------------------------------
+    def _import_file(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Importar DXF ou PDF",
+            filetypes=[
+                ("DXF ou PDF", "*.dxf *.pdf"),
+                ("DXF", "*.dxf"),
+                ("PDF", "*.pdf"),
+                ("Todos os ficheiros", "*.*"),
+            ],
+        )
+        if not path:
+            return
+
+        dialog = ImportDialog(self, Path(path))
+        self.wait_window(dialog)
+        document = dialog.result
+        if document is None:
+            return
+        self._apply_document(document)
+
+    def _apply_document(self, document: ImportedDocument) -> None:
+        if self.preview.simulation_active:
+            self._stop_simulation()
+
+        self._document = document
+        self._sim_plan = None
+        self._comparison = []
+        self.preview.update_document(document)
+
+        self.import_banner_label.configure(
+            text=f"Importado: {document.title} • {document.path_count} caminhos"
+        )
+        self.import_banner.grid()
+        self.close_import_button.configure(state="normal")
+        self.file_info.configure(
+            text=(
+                f"{document.title}\n"
+                f"{document.path_count} caminhos • "
+                f"{document.sheet.width:.0f} × {document.sheet.height:.0f} mm"
+            )
+        )
+        self.header_info.configure(
+            text=f"{document.sheet.width:g} × {document.sheet.height:g} mm"
+        )
+        self._update_document_status(document)
+
+        if document.warnings:
+            messagebox.showinfo(
+                "Documento importado",
+                "\n".join(document.warnings),
+                parent=self,
+            )
+
+    def _close_import(self) -> None:
+        if self._document is None:
+            return
+        if self.preview.simulation_active:
+            self._stop_simulation()
+        self._document = None
+        self._sim_plan = None
+        self._comparison = []
+        self.import_banner.grid_remove()
+        self.close_import_button.configure(state="disabled")
+        self.file_info.configure(text="Sem documento importado.")
+        self._schedule_refresh()
+
+    def _update_document_status(self, document: ImportedDocument) -> None:
+        self.status_dot.configure(text_color=theme.GREEN)
+        self.status_label.configure(
+            text=(
+                f"Documento importado: {document.path_count} caminhos • "
+                f"{document.total_length:,.0f} mm de linework"
+            ),
+            text_color=theme.TEXT_DIM,
+        )
+        self.occupancy_label.configure(text="")
+        self.count_label.configure(text=f"{document.path_count} caminhos")
+
+    # ------------------------------------------------------------------
     #  Simulação de corte
     # ------------------------------------------------------------------
     def _on_cutting_text_change(self, *_args) -> None:
@@ -864,17 +1139,114 @@ class MainWindow(ctk.CTk):
                 self.cut_strategy.get(), STRATEGY_PROXIMITY
             ),
             "keep_blade_down": bool(self.keep_blade_down.get()),
+            "objective": OBJECTIVE_KEYS.get(
+                self.cut_objective.get(), OBJECTIVE_DISTANCE
+            ),
+            "start": START_KEYS.get(self.cut_start.get(), DEFAULT_START),
         }
+
+    def _build_current_plan(self) -> CutPlan:
+        if self._document is not None:
+            return build_imported_cut_plan(
+                self._document,
+                quality="high",
+                **self._cut_plan_options(),
+            )
+        return build_cut_plan(
+            self._label,
+            self._layout,
+            sheet=self._sheet,
+            quality="high",
+            **self._cut_plan_options(),
+        )
+
+    def _compare_plans(self) -> None:
+        objective = OBJECTIVE_KEYS.get(
+            self.cut_objective.get(), OBJECTIVE_DISTANCE
+        )
+        options = self._cut_plan_options()
+
+        if self._document is not None:
+            if self._document.is_empty:
+                messagebox.showwarning(
+                    "Documento vazio",
+                    "O documento importado não tem caminhos para comparar.",
+                    parent=self,
+                )
+                return
+            optimize = self._document.path_count <= 600
+            self.status_label.configure(
+                text="A comparar percursos…", text_color=theme.TEXT_DIM
+            )
+            self.update_idletasks()
+            plans = compare_imported_strategies(
+                self._document,
+                optimize=optimize,
+                keep_blade_down=options["keep_blade_down"],
+                objective=objective,
+                start=options["start"],
+            )
+        else:
+            if not self._simulation_ready():
+                return
+            optimize = self._layout.count <= 600
+            self.status_label.configure(
+                text="A comparar percursos…", text_color=theme.TEXT_DIM
+            )
+            self.update_idletasks()
+            plans = compare_strategies(
+                self._label,
+                self._layout,
+                sheet=self._sheet,
+                optimize=optimize,
+                keep_blade_down=options["keep_blade_down"],
+                objective=objective,
+                start=options["start"],
+            )
+
+        if not plans:
+            messagebox.showwarning(
+                "Comparação de percursos",
+                "Não foi possível gerar percursos para este documento.",
+                parent=self,
+            )
+            return
+
+        self._comparison = plans
+        best = STRATEGY_LABELS.get(plans[0][0], plans[0][0])
+        self.status_dot.configure(text_color=theme.GREEN)
+        self.status_label.configure(
+            text=(
+                f"Comparação pronta: {len(plans)} percursos • "
+                f"melhor para o objetivo: {best}"
+            ),
+            text_color=theme.TEXT_DIM,
+        )
+        CompareDialog(
+            self,
+            plans,
+            objective,
+            on_apply=self._apply_strategy,
+        )
+
+    def _apply_strategy(self, strategy: str) -> None:
+        self.cut_strategy.set(STRATEGY_LABELS.get(strategy, strategy))
+        if self.preview.simulation_active:
+            self._replan_simulation()
+            return
+        self.status_dot.configure(text_color=theme.GREEN)
+        self.status_label.configure(
+            text=(
+                f"Estratégia aplicada: {STRATEGY_LABELS.get(strategy, strategy)}. "
+                "Inicie a simulação para ver o percurso."
+            ),
+            text_color=theme.TEXT_DIM,
+        )
 
     def _replan_simulation(self) -> None:
         if not self._simulation_ready():
             return
-        plan = build_cut_plan(
-            self._label,
-            self._layout,
-            quality="high",
-            **self._cut_plan_options(),
-        )
+        plan = self._build_current_plan()
         if plan.is_empty:
             return
         self._sim_plan = plan
@@ -889,6 +1261,15 @@ class MainWindow(ctk.CTk):
             self._start_simulation()
 
     def _simulation_ready(self) -> bool:
+        if self._document is not None:
+            if self._document.is_empty:
+                messagebox.showwarning(
+                    "Documento vazio",
+                    "O documento importado não tem caminhos para simular.",
+                    parent=self,
+                )
+                return False
+            return True
         if not self._sheet.is_valid:
             messagebox.showwarning(
                 "Dimensões inválidas",
@@ -929,16 +1310,11 @@ class MainWindow(ctk.CTk):
         )
         self.update_idletasks()
 
-        plan = build_cut_plan(
-            self._label,
-            self._layout,
-            quality="high",
-            **self._cut_plan_options(),
-        )
+        plan = self._build_current_plan()
         if plan.is_empty:
             messagebox.showwarning(
                 "Simulação de corte",
-                "Não foi possível gerar o percurso de corte para este layout.",
+                "Não foi possível gerar o percurso de corte para este documento.",
                 parent=self,
             )
             return
@@ -964,6 +1340,7 @@ class MainWindow(ctk.CTk):
 
     def _show_plan_status(self, plan: CutPlan, *, finished: bool) -> None:
         strategy = STRATEGY_LABELS.get(plan.strategy, plan.strategy)
+        unit = "caminhos" if self._document is not None else "etiquetas"
         lifts = f"{plan.lift_count} elevaç{'ão' if plan.lift_count == 1 else 'ões'}"
         if finished:
             parts = [
@@ -976,14 +1353,14 @@ class MainWindow(ctk.CTk):
             parts.append(f"deslocamento {plan.travel_length:,.0f} mm")
             self.status_dot.configure(text_color=theme.GREEN)
             text = (
-                f"Simulação concluída • {strategy} • {plan.label_count} etiquetas • "
+                f"Simulação concluída • {strategy} • {plan.label_count} {unit} • "
                 + " + ".join(parts)
                 + f" • {lifts}"
             )
         else:
             self.status_dot.configure(text_color=theme.CYAN)
             text = (
-                f"Simulação de corte • {strategy} • {plan.label_count} etiquetas • "
+                f"Simulação de corte • {strategy} • {plan.label_count} {unit} • "
                 f"{plan.total_length:,.0f} mm • {lifts}"
             )
         self.status_label.configure(text=text, text_color=theme.TEXT_DIM)
@@ -1012,7 +1389,10 @@ class MainWindow(ctk.CTk):
         )
         self.sim_progress_label.configure(text="0%")
         self._sim_plan = None
-        self._update_status(self._sheet, self._label, self._layout)
+        if self._document is not None:
+            self._update_document_status(self._document)
+        else:
+            self._update_status(self._sheet, self._label, self._layout)
 
     def _on_sim_speed(self, value: float) -> None:
         self.preview.set_simulation_speed(float(value))
@@ -1079,10 +1459,11 @@ class MainWindow(ctk.CTk):
             return
 
         strategy = STRATEGY_LABELS.get(plan.strategy, plan.strategy)
+        unit = "caminhos" if self._document is not None else "etiquetas"
         messagebox.showinfo(
             f"{filetype} guardado",
             (
-                f"Percurso {strategy} guardado com {plan.label_count} etiquetas, "
+                f"Percurso {strategy} guardado com {plan.label_count} {unit}, "
                 f"{plan.lift_count} elevações de lâmina e "
                 f"{plan.total_length:,.0f} mm no total:\n{path}"
             ),
@@ -1113,6 +1494,8 @@ class MainWindow(ctk.CTk):
     # ------------------------------------------------------------------
     def _refresh(self) -> None:
         self._refresh_job = None
+        if self._document is not None:
+            return
 
         sheet = SheetSpec(
             self._value(self.sheet_w),
@@ -1207,6 +1590,15 @@ class MainWindow(ctk.CTk):
     #  Exportação
     # ------------------------------------------------------------------
     def _export_ready(self) -> bool:
+        if self._document is not None:
+            if self._document.is_empty:
+                messagebox.showwarning(
+                    "Nada para exportar",
+                    "O documento importado não tem caminhos.",
+                    parent=self,
+                )
+                return False
+            return True
         if not self._sheet.is_valid:
             messagebox.showwarning(
                 "Dimensões inválidas",
@@ -1239,6 +1631,8 @@ class MainWindow(ctk.CTk):
         return True
 
     def _suggested_name(self, extension: str) -> str:
+        if self._document is not None:
+            return self._document.source.stem + extension
         label = self._label
         shape = _slug(label.shape.value)
         parts = ["etiqueta", shape, f"{label.width:g}x{label.height:g}"]
@@ -1267,16 +1661,24 @@ class MainWindow(ctk.CTk):
         if not path:
             return
         try:
-            export_pdf(path, self._sheet, self._label, self._layout)
+            if self._document is not None:
+                export_document_pdf(path, self._document)
+            else:
+                export_pdf(path, self._sheet, self._label, self._layout)
         except OSError as exc:
             messagebox.showerror("Erro ao exportar", str(exc), parent=self)
             return
         except Exception as exc:  # pragma: no cover - proteção da UI
             messagebox.showerror("Erro ao exportar PDF", str(exc), parent=self)
             return
+        count = (
+            self._document.path_count
+            if self._document is not None
+            else self._layout.count
+        )
         messagebox.showinfo(
             "PDF exportado",
-            f"PDF criado com {self._layout.count} dielines:\n{path}",
+            f"PDF criado com {count} caminhos:\n{path}",
             parent=self,
         )
 
@@ -1287,16 +1689,25 @@ class MainWindow(ctk.CTk):
         if not path:
             return
         try:
-            export_dxf(path, self._sheet, self._label, self._layout)
+            if self._document is not None:
+                export_document_dxf(path, self._document)
+            else:
+                export_dxf(path, self._sheet, self._label, self._layout)
         except OSError as exc:
             messagebox.showerror("Erro ao exportar", str(exc), parent=self)
             return
         except Exception as exc:  # pragma: no cover - proteção da UI
             messagebox.showerror("Erro ao exportar DXF", str(exc), parent=self)
             return
+        count = (
+            self._document.path_count
+            if self._document is not None
+            else self._layout.count
+        )
+        layer = "IMPORTADO" if self._document is not None else "DIELINE"
         messagebox.showinfo(
             "DXF exportado",
-            f"DXF criado com {self._layout.count} dielines no layer DIELINE:\n{path}",
+            f"DXF criado com {count} caminhos no layer {layer}:\n{path}",
             parent=self,
         )
 

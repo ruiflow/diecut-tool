@@ -1,3 +1,3 @@
-"""DieCUT Tool v3."""
+"""DieCUT Tool v4."""
 
-__version__ = "3"
+__version__ = "4"

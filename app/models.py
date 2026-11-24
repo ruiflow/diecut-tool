@@ -1,4 +1,4 @@
-"""Modelos de domínio da DieCUT Tool v3.
+"""Modelos de domínio da DieCUT Tool v4.
 
 Mantém os cálculos independentes da interface: a UI apenas lê e escreve
 nestas estruturas, o que facilita testes e exportação.

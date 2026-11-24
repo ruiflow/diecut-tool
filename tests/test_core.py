@@ -10,20 +10,34 @@ from pathlib import Path
 import ezdxf
 from ezdxf import bbox
 
-from app import geometry
+from app import __version__, geometry
 from app.cutting import (
     KIND_CUT,
     KIND_TRAVEL,
+    OBJECTIVE_BALANCED,
+    OBJECTIVE_DISTANCE,
+    OBJECTIVE_LIFTS,
+    STRATEGY_COLUMNS,
+    STRATEGY_PER_LABEL,
     STRATEGY_PROXIMITY,
+    STRATEGY_SPIRAL,
     STRATEGY_ZIGZAG,
     build_cut_plan,
+    build_imported_cut_plan,
+    compare_imported_strategies,
+    compare_strategies,
+    objective_score,
+    start_point,
 )
 from app.exporters import (
     export_cut_plan_dxf,
     export_cut_plan_pdf,
+    export_document_dxf,
+    export_document_pdf,
     export_dxf,
     export_pdf,
 )
+from app.importers import load_dxf, load_pdf, pdf_page_count
 from app.layout import auto_grid, compute_layout, shape_origin
 from app.models import LabelSpec, LayoutSpec, ShapeType, SheetSpec
 
@@ -478,6 +492,236 @@ class ExportTests(unittest.TestCase):
                 entities = list(ezdxf.readfile(path).modelspace())
                 self.assertEqual(len(entities), 4)
                 self.assertTrue(all(e.dxftype() == "LWPOLYLINE" for e in entities))
+
+
+class StrategyTests(unittest.TestCase):
+    def _scene(self):
+        sheet = SheetSpec(210, 297)
+        label = LabelSpec(50, 30, 2, ShapeType.ROUNDED_RECT, 0.4)
+        layout = compute_layout(sheet, label, 2, 2, LayoutSpec(3, 4))
+        return sheet, label, layout
+
+    def test_new_strategies_cover_every_label(self) -> None:
+        sheet, label, layout = self._scene()
+        for strategy in (STRATEGY_COLUMNS, STRATEGY_SPIRAL, STRATEGY_PER_LABEL):
+            plan = build_cut_plan(label, layout, sheet=sheet, strategy=strategy)
+            self.assertEqual(plan.strategy, strategy)
+            self.assertEqual(len(plan.order), layout.count)
+            self.assertEqual(set(plan.order), set(range(layout.count)))
+            self.assertGreater(plan.cut_length, 0)
+
+    def test_columns_alternate_columns(self) -> None:
+        sheet, label, layout = self._scene()
+        plan = build_cut_plan(label, layout, sheet=sheet, strategy=STRATEGY_COLUMNS)
+
+        columns: list[list[float]] = []
+        current_x: float | None = None
+        for index in plan.order:
+            x, y = layout.positions[index]
+            if current_x is None or abs(x - current_x) > 1e-6:
+                columns.append([])
+                current_x = x
+            columns[-1].append(y)
+
+        self.assertGreater(len(columns), 1)
+        for column_number, ys in enumerate(columns):
+            self.assertEqual(ys, sorted(ys, reverse=bool(column_number % 2)))
+
+    def test_spiral_differs_from_proximity(self) -> None:
+        sheet, label, layout = self._scene()
+        proximity = build_cut_plan(label, layout, sheet=sheet)
+        spiral = build_cut_plan(label, layout, sheet=sheet, strategy=STRATEGY_SPIRAL)
+        self.assertNotEqual(proximity.order, spiral.order)
+
+    def test_per_label_does_not_merge_contours(self) -> None:
+        sheet = SheetSpec(210, 297)
+        label = LabelSpec(50, 30, 0, ShapeType.ROUNDED_RECT, 0)
+        layout = compute_layout(sheet, label, 0, 0, LayoutSpec(2, 2))
+
+        merged = build_cut_plan(label, layout, sheet=sheet, keep_blade_down=True)
+        separate = build_cut_plan(
+            label,
+            layout,
+            sheet=sheet,
+            strategy=STRATEGY_PER_LABEL,
+        )
+        merged_cuts = sum(1 for segment in merged.segments if segment.kind == KIND_CUT)
+        separate_cuts = sum(
+            1 for segment in separate.segments if segment.kind == KIND_CUT
+        )
+        self.assertEqual(separate_cuts, 4)
+        self.assertLess(merged_cuts, separate_cuts)
+
+    def test_start_point_and_first_travel(self) -> None:
+        sheet = SheetSpec(210, 297)
+        self.assertEqual(start_point(sheet, "top-left"), (0.0, 0.0))
+        self.assertEqual(start_point(sheet, "top-right"), (210.0, 0.0))
+        self.assertEqual(start_point(sheet, "bottom-left"), (0.0, 297.0))
+        self.assertEqual(start_point(sheet, "bottom-right"), (210.0, 297.0))
+        self.assertEqual(start_point(sheet, "center"), (105.0, 148.5))
+
+        label = LabelSpec(50, 30)
+        layout = compute_layout(sheet, label, 2, 2, LayoutSpec(1, 1))
+        plan = build_cut_plan(
+            label,
+            layout,
+            sheet=sheet,
+            keep_blade_down=False,
+            start="top-right",
+        )
+        first = plan.segments[0]
+        self.assertEqual(first.kind, KIND_TRAVEL)
+        self.assertEqual(first.points[0], (210.0, 0.0))
+
+    def test_objective_scores(self) -> None:
+        sheet, label, layout = self._scene()
+        plan = build_cut_plan(label, layout, sheet=sheet)
+        self.assertAlmostEqual(
+            objective_score(plan, OBJECTIVE_DISTANCE), plan.total_length
+        )
+        self.assertGreater(
+            objective_score(plan, OBJECTIVE_LIFTS), plan.lift_count * 1000
+        )
+        self.assertAlmostEqual(
+            objective_score(plan, OBJECTIVE_BALANCED),
+            plan.total_length + plan.lift_count * 75.0,
+        )
+
+    def test_compare_strategies_sorted_by_objective(self) -> None:
+        sheet, label, layout = self._scene()
+        plans = compare_strategies(label, layout, sheet=sheet)
+        self.assertEqual(len(plans), 5)
+        scores = [objective_score(plan, OBJECTIVE_DISTANCE) for _key, plan in plans]
+        self.assertEqual(scores, sorted(scores))
+
+
+class ImportTests(unittest.TestCase):
+    def _export_scene(self, directory: Path, *, overlap: float = 0.0):
+        sheet = SheetSpec(210, 297)
+        label = LabelSpec(50, 30, 2, ShapeType.ROUNDED_RECT, overlap)
+        layout = compute_layout(sheet, label, 2, 2, LayoutSpec(3, 4))
+        pdf_path = directory / "dieline.pdf"
+        dxf_path = directory / "dieline.dxf"
+        export_pdf(pdf_path, sheet, label, layout)
+        export_dxf(dxf_path, sheet, label, layout)
+        return sheet, label, layout, pdf_path, dxf_path
+
+    def test_pdf_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            sheet, _label, layout, pdf_path, _dxf_path = self._export_scene(Path(tmp))
+            self.assertEqual(pdf_page_count(pdf_path), 1)
+            document = load_pdf(pdf_path)
+            self.assertEqual(document.kind, "pdf")
+            self.assertEqual(document.path_count, layout.count)
+            self.assertTrue(all(path.closed for path in document.paths))
+            self.assertAlmostEqual(document.sheet.width, sheet.width, delta=0.1)
+            self.assertAlmostEqual(document.sheet.height, sheet.height, delta=0.1)
+
+    def test_pdf_import_keeps_top_origin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _sheet, label, layout, pdf_path, _dxf_path = self._export_scene(
+                Path(tmp)
+            )
+            document = load_pdf(pdf_path)
+            ys = [point[1] for path in document.paths for point in path.points]
+            xs = [point[0] for path in document.paths for point in path.points]
+
+            expected_top = min(y for _x, y in layout.positions)
+            expected_bottom = max(y for _x, y in layout.positions) + label.height
+            expected_left = min(x for x, _y in layout.positions)
+            expected_right = max(x for x, _y in layout.positions) + label.width
+
+            self.assertAlmostEqual(min(ys), expected_top, delta=0.5)
+            self.assertAlmostEqual(max(ys), expected_bottom, delta=0.5)
+            self.assertAlmostEqual(min(xs), expected_left, delta=0.5)
+            self.assertAlmostEqual(max(xs), expected_right, delta=0.5)
+
+    def test_dxf_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _sheet, _label, layout, _pdf_path, dxf_path = self._export_scene(
+                Path(tmp)
+            )
+            document = load_dxf(dxf_path)
+            self.assertEqual(document.kind, "dxf")
+            self.assertEqual(document.path_count, layout.count)
+            self.assertTrue(all(path.closed for path in document.paths))
+            self.assertAlmostEqual(document.sheet.width, layout.block_width, delta=0.5)
+            self.assertAlmostEqual(document.sheet.height, layout.block_height, delta=0.5)
+
+    def test_dxf_open_contours_stay_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _sheet, _label, layout, _pdf_path, dxf_path = self._export_scene(
+                Path(tmp), overlap=2.0
+            )
+            document = load_dxf(dxf_path)
+            self.assertEqual(document.path_count, layout.count)
+            self.assertFalse(any(path.closed for path in document.paths))
+
+            plan = build_imported_cut_plan(document)
+            self.assertEqual(plan.label_count, layout.count)
+            self.assertGreater(plan.cut_length, 0)
+
+    def test_imported_plan_and_comparison(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _sheet, _label, layout, _pdf_path, dxf_path = self._export_scene(
+                Path(tmp)
+            )
+            document = load_dxf(dxf_path)
+            plan = build_imported_cut_plan(document)
+            self.assertEqual(plan.label_count, document.path_count)
+            self.assertGreater(plan.cut_length, 0)
+
+            plans = compare_imported_strategies(document)
+            self.assertEqual(len(plans), 5)
+            scores = [
+                objective_score(plan, OBJECTIVE_DISTANCE) for _key, plan in plans
+            ]
+            self.assertEqual(scores, sorted(scores))
+
+    def test_export_imported_document(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _sheet, _label, _layout, pdf_path, _dxf_path = self._export_scene(
+                Path(tmp)
+            )
+            document = load_pdf(pdf_path)
+            out_pdf = Path(tmp) / "importado.pdf"
+            out_dxf = Path(tmp) / "importado.dxf"
+            export_document_pdf(out_pdf, document)
+            export_document_dxf(out_dxf, document)
+
+            self.assertEqual(out_pdf.read_bytes()[:4], b"%PDF")
+            doc = ezdxf.readfile(out_dxf)
+            self.assertIn("IMPORTADO", doc.layers)
+            self.assertEqual(len(list(doc.modelspace())), document.path_count)
+
+    def test_pdf_without_vectors(self) -> None:
+        from reportlab.lib.units import mm as pdf_mm
+        from reportlab.pdfgen import canvas as pdf_canvas
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "texto.pdf"
+            c = pdf_canvas.Canvas(str(path), pagesize=(210 * pdf_mm, 297 * pdf_mm))
+            c.drawString(20 * pdf_mm, 20 * pdf_mm, "Sem vetores")
+            c.showPage()
+            c.save()
+            with self.assertRaises(ValueError):
+                load_pdf(path)
+
+    def test_empty_dxf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "vazio.dxf"
+            doc = ezdxf.new()
+            doc.saveas(str(path))
+            with self.assertRaises(ValueError):
+                load_dxf(path)
+
+
+class VersionTests(unittest.TestCase):
+    def test_version_metadata(self) -> None:
+        from app.ui.about import _version_text
+
+        self.assertEqual(__version__, "4")
+        self.assertIn("DieCUT Tool v4", _version_text())
 
 
 if __name__ == "__main__":

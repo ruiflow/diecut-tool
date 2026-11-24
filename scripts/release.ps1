@@ -106,7 +106,7 @@ Rodar $Git @("add", "-A") -Silencioso | Out-Null
 $staged = @(& $Git diff --cached --name-only)
 if ($staged.Count -gt 0) {
     Rodar $Git @("-c", "user.name=$Owner", "-c", "user.email=$Owner@users.noreply.github.com",
-        "commit", "-m", "DieCUT Tool v3: estrategias de percurso e guardar corte") -Silencioso | Out-Null
+        "commit", "-m", "DieCUT Tool v4: otimizacao do percurso, importacao DXF/PDF e acerca") -Silencioso | Out-Null
     Write-Host "$($staged.Count) arquivo(s) no commit"
 } else {
     Write-Host "nada novo para commitar"
@@ -118,7 +118,7 @@ Rodar $Gh @("auth", "setup-git") -Silencioso | Out-Null
 
 if ((Rodar $Gh @("repo", "view", "$Owner/$Repo") -Silencioso) -ne 0) {
     Rodar $Gh @("repo", "create", "$Owner/$Repo", "--$Visibility", "--source", ".", "--remote", "origin", "--push",
-        "--description", "Gerador de cortantes (dielines) para etiquetas: pre-visualizacao 2D/3D, simulacao de corte, PDF e DXF") | Out-Null
+        "--description", "Gerador de cortantes (dielines) para etiquetas: pre-visualizacao 2D/3D, otimizacao do percurso, importacao DXF/PDF, PDF e DXF") | Out-Null
 } else {
     Write-Host "repositorio ja existe - enviando commits"
     if ((Rodar $Git @("remote", "get-url", "origin") -Silencioso) -ne 0) {
@@ -134,28 +134,28 @@ Rodar $Gh @("repo", "edit", "$Owner/$Repo",
 # --- 5. Releases com os .exe ---------------------------------------------
 if (-not $SkipReleases) {
     Passo "Criando as releases com os executaveis"
-    $appExe = "dist\DieCutTool v3.exe"
+    $appExe = "dist\DieCutTool v4.exe"
     $legacyExe = "legacy\v1\dist\DieCutTool v1.exe"
     $stage = Join-Path $env:TEMP "diecut-release"
     New-Item -ItemType Directory -Force $stage | Out-Null
 
-    $notesV3 = @(
-        "Percurso de corte configuravel, menos elevacoes de lamina e exportacao do traçado otimizado.",
+    $notesV4 = @(
+        "Otimizacao do percurso em primeiro lugar, importacao de ficheiros e dialogo Acerca de.",
         "",
-        "- Tema escuro com cartoes e paleta magenta/ciano",
-        "- Pre-visualizacao 2D/3D com orbita 360 graus pelo rato, zoom, pan e grelha adaptativa",
-        "- Simulacao de corte com cabeca animada e velocidade ajustavel",
-        "- Ordem de corte por proximidade (vizinho mais proximo + 2-opt) ou em zigue-zague",
+        "- Cinco estrategias de percurso: Proximidade+, Zigue-zague, Colunas, Espiral e Por etiqueta",
+        "- Objetivos de otimizacao: menos distancia, menos elevacoes, mais rapido ou equilibrado",
+        "- Ponto de inicio do percurso configuravel (cantos ou centro da folha)",
+        "- Comparacao de percursos com corte, deslocamento, ligacoes, elevacoes, tempo e pontuacao",
+        "- Importacao de DXF (camadas selecionaveis) e PDF vetorial (paginas selecionaveis)",
+        "- Documento importado torna-se o documento ativo: pre-visualizacao, simulacao e exportacao",
+        "- Curvas de Bezier achatadas e conversao automatica para milimetros",
+        "- Dialogo Acerca de com versao, ambiente, creditos a OpenCode, DeepSeek e Rui Flow, e ligacoes",
+        "- Exportacao de documentos importados em PDF vetorial e DXF (layer IMPORTADO)",
+        "- Tema escuro, pre-visualizacao 2D/3D, simulacao de corte e modo automatico",
         "- Contornos encostados fundidos num grafo de arestas unicas, sem cortar duas vezes a mesma aresta",
-        "- Estatisticas de corte, ligacoes, deslocamento e numero de elevacoes",
         "- Guardar o percurso otimizado em DXF (layers CORTE e DESLOCAMENTO) ou PDF",
-        "- Margem de seguranca removida: a folha e usada por inteiro",
-        "- Modo automatico de colunas e fileiras",
-        "- Formatos retangulo (raio de canto), oval e circulo",
-        "- Over-compensate para a lamina fechar o corte",
-        "- Exportacao PDF vetorial no tamanho exato da folha",
-        "- Exportacao DXF em milimetros, layer DIELINE",
-        "- 32 testes automatizados",
+        "- Exportacao PDF vetorial e DXF em milimetros (layer DIELINE)",
+        "- 48 testes automatizados",
         "",
         "**Requisitos:** Windows 10/11. Nao e necessaria instalacao."
     ) -join "`n"
@@ -166,23 +166,23 @@ if (-not $SkipReleases) {
         "Mantida como legado para download e consulta. O desenvolvimento continua na versão atual."
     ) -join "`n"
 
-    $notesV3Path = Join-Path $stage "notas-v3.md"
+    $notesV4Path = Join-Path $stage "notas-v4.md"
     $notesV1Path = Join-Path $stage "notas-v1.md"
-    [System.IO.File]::WriteAllText($notesV3Path, $notesV3, (New-Object System.Text.UTF8Encoding $false))
+    [System.IO.File]::WriteAllText($notesV4Path, $notesV4, (New-Object System.Text.UTF8Encoding $false))
     [System.IO.File]::WriteAllText($notesV1Path, $notesV1, (New-Object System.Text.UTF8Encoding $false))
 
     if (Test-Path $appExe) {
-        $appAsset = Join-Path $stage "DieCutTool-v3.exe"
+        $appAsset = Join-Path $stage "DieCutTool-v4.exe"
         Copy-Item $appExe $appAsset -Force
-        if ((Rodar $Gh @("release", "view", "v3") -Silencioso) -ne 0) {
-            Rodar $Gh @("release", "create", "v3", $appAsset, "--title", "DieCUT Tool v3",
-                "--notes-file", $notesV3Path, "--latest") | Out-Null
+        if ((Rodar $Gh @("release", "view", "v4") -Silencioso) -ne 0) {
+            Rodar $Gh @("release", "create", "v4", $appAsset, "--title", "DieCUT Tool v4",
+                "--notes-file", $notesV4Path, "--latest") | Out-Null
         } else {
-            Rodar $Gh @("release", "upload", "v3", $appAsset, "--clobber") | Out-Null
+            Rodar $Gh @("release", "upload", "v4", $appAsset, "--clobber") | Out-Null
         }
-        Write-Host "release v3 publicada"
+        Write-Host "release v4 publicada"
     } else {
-        Write-Host "aviso: $appExe nao encontrado - release v3 ignorada" -ForegroundColor Yellow
+        Write-Host "aviso: $appExe nao encontrado - release v4 ignorada" -ForegroundColor Yellow
     }
 
     if (Test-Path $legacyExe) {
@@ -199,14 +199,14 @@ if (-not $SkipReleases) {
         Write-Host "aviso: $legacyExe nao encontrado - release v1 ignorada" -ForegroundColor Yellow
     }
 
-    # A release v1 e criada depois da v3; o GitHub marca a mais recente como
-    # "Latest" por padrao. Forca a v3 como Latest para o botao principal.
-    $releaseJson = Capturar $Gh @("api", "repos/$Owner/$Repo/releases/tags/v3")
+    # A release v1 e criada depois da v4; o GitHub marca a mais recente como
+    # "Latest" por padrao. Forca a v4 como Latest para o botao principal.
+    $releaseJson = Capturar $Gh @("api", "repos/$Owner/$Repo/releases/tags/v4")
     if ($releaseJson) {
-        $v3id = ($releaseJson | ConvertFrom-Json).id
-        if ($v3id) {
-            Rodar $Gh @("api", "-X", "PATCH", "repos/$Owner/$Repo/releases/$v3id", "-F", "make_latest=true") -Silencioso | Out-Null
-            Write-Host "v3 marcada como Latest"
+        $v4id = ($releaseJson | ConvertFrom-Json).id
+        if ($v4id) {
+            Rodar $Gh @("api", "-X", "PATCH", "repos/$Owner/$Repo/releases/$v4id", "-F", "make_latest=true") -Silencioso | Out-Null
+            Write-Host "v4 marcada como Latest"
         }
     }
 }

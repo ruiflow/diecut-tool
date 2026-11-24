@@ -18,6 +18,7 @@ ACCENT_RGB = (0.878, 0.251, 0.627)  # #e040a0
 DIELINE_LAYER = "DIELINE"
 CUT_LAYER = "CORTE"
 TRAVEL_LAYER = "DESLOCAMENTO"
+IMPORT_LAYER = "IMPORTADO"
 BULGE_90 = math.tan(math.radians(90.0) / 4.0)  # 0.4142...
 
 
@@ -95,7 +96,7 @@ def export_pdf(
     c = pdf_canvas.Canvas(
         str(path), pagesize=(sheet.width * mm_unit, sheet.height * mm_unit)
     )
-    c.setTitle("DieCUT Tool v3 - Dielines")
+    c.setTitle("DieCUT Tool v4 - Dielines")
     c.setAuthor("DieCUT Tool")
     c.setSubject(f"{layout.columns} x {layout.rows} etiquetas - {label.shape.value}")
     c.setStrokeColorRGB(*ACCENT_RGB)
@@ -255,7 +256,7 @@ def export_cut_plan_pdf(
     c = pdf_canvas.Canvas(
         str(path), pagesize=(sheet.width * mm_unit, sheet.height * mm_unit)
     )
-    c.setTitle("DieCUT Tool v3 - Percurso de corte")
+    c.setTitle("DieCUT Tool v4 - Percurso de corte")
     c.setAuthor("DieCUT Tool")
     c.setSubject(
         f"Percurso {plan.strategy} - {plan.label_count} etiquetas - "
@@ -355,6 +356,71 @@ def export_cut_plan_dxf(
                 dxfattribs={"layer": TRAVEL_LAYER},
             )
     flush_run()
+
+    doc.set_modelspace_vport(
+        height=max(sheet.height, 1.0),
+        center=(sheet.width / 2.0, sheet.height / 2.0),
+    )
+    doc.saveas(str(path))
+
+
+def export_document_pdf(path: str | Path, document) -> None:
+    """Exporta os caminhos de um documento importado para PDF vetorial."""
+
+    sheet = document.sheet
+    c = pdf_canvas.Canvas(
+        str(path), pagesize=(sheet.width * mm_unit, sheet.height * mm_unit)
+    )
+    c.setTitle(f"DieCUT Tool v4 - {document.source.name or 'Importado'}")
+    c.setAuthor("DieCUT Tool")
+    c.setSubject(f"{document.path_count} caminhos importados")
+    c.setStrokeColorRGB(*ACCENT_RGB)
+    c.setLineWidth(0.35 * mm_unit)
+    c.setLineJoin(1)
+
+    for imported in document.paths:
+        if len(imported.points) < 2:
+            continue
+        point = c.beginPath()
+        first_x, first_y = imported.points[0]
+        point.moveTo(first_x * mm_unit, (sheet.height - first_y) * mm_unit)
+        for px, py in imported.points[1:]:
+            point.lineTo(px * mm_unit, (sheet.height - py) * mm_unit)
+        if imported.closed:
+            point.close()
+        c.drawPath(point, stroke=1, fill=0)
+
+    c.showPage()
+    c.save()
+
+
+def export_document_dxf(path: str | Path, document) -> None:
+    """Exporta os caminhos de um documento importado para DXF em mm."""
+
+    sheet = document.sheet
+    doc = ezdxf.new("R2010", setup=True)
+    doc.units = ezdxf.units.MM
+    doc.header["$INSUNITS"] = 4
+    doc.header["$MEASUREMENT"] = 1
+
+    layer = doc.layers.add(IMPORT_LAYER, color=6)
+    layer.dxf.linetype = "CONTINUOUS"
+    try:
+        layer.rgb = (224, 64, 160)
+    except (AttributeError, ValueError):
+        pass
+
+    msp = doc.modelspace()
+    for imported in document.paths:
+        if len(imported.points) < 2:
+            continue
+        points = [(px, sheet.height - py) for px, py in imported.points]
+        msp.add_lwpolyline(
+            points,
+            format="xy",
+            close=bool(imported.closed),
+            dxfattribs={"layer": IMPORT_LAYER},
+        )
 
     doc.set_modelspace_vport(
         height=max(sheet.height, 1.0),

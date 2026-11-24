@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 
 from . import geometry
 from .layout import shape_origin
-from .models import LabelSpec, LayoutResult
+from .models import LabelSpec, LayoutResult, SheetSpec
 
 Point = geometry.Point
 
@@ -34,7 +34,9 @@ HOME: Point = (0.0, 0.0)
 MAX_PLAN_LABELS = 1500
 TWO_OPT_LIMIT = 320
 TWO_OPT_PASSES = 12
+OR_OPT_LIMIT = 120
 MAX_GRAPH_EDGES = 60000
+MULTI_START_LIMIT = 20
 SNAP_DECIMALS = 3
 
 KIND_CUT = "cut"
@@ -42,11 +44,46 @@ KIND_TRAVEL = "travel"
 
 STRATEGY_PROXIMITY = "proximity"
 STRATEGY_ZIGZAG = "zigzag"
+STRATEGY_COLUMNS = "columns"
+STRATEGY_SPIRAL = "spiral"
+STRATEGY_PER_LABEL = "per-label"
 STRATEGY_LABELS = {
-    STRATEGY_PROXIMITY: "Proximidade",
+    STRATEGY_PROXIMITY: "Proximidade+",
     STRATEGY_ZIGZAG: "Zigue-zague",
+    STRATEGY_COLUMNS: "Colunas",
+    STRATEGY_SPIRAL: "Espiral",
+    STRATEGY_PER_LABEL: "Por etiqueta",
 }
 STRATEGY_KEYS = {label: key for key, label in STRATEGY_LABELS.items()}
+
+OBJECTIVE_DISTANCE = "distance"
+OBJECTIVE_LIFTS = "lifts"
+OBJECTIVE_TIME = "time"
+OBJECTIVE_BALANCED = "balanced"
+OBJECTIVE_LABELS = {
+    OBJECTIVE_DISTANCE: "Menos distância",
+    OBJECTIVE_LIFTS: "Menos elevações",
+    OBJECTIVE_TIME: "Mais rápido",
+    OBJECTIVE_BALANCED: "Equilibrado",
+}
+OBJECTIVE_KEYS = {label: key for key, label in OBJECTIVE_LABELS.items()}
+
+START_LABELS = {
+    "bottom-left": "Inferior esquerdo",
+    "bottom-right": "Inferior direito",
+    "top-left": "Superior esquerdo",
+    "top-right": "Superior direito",
+    "center": "Centro",
+}
+START_KEYS = {label: key for key, label in START_LABELS.items()}
+# O sistema da aplicação tem a origem no canto superior esquerdo e o eixo Y
+# a crescer para baixo; por isso "top-left" continua a ser o HOME histórico.
+DEFAULT_START = "top-left"
+
+CUT_SPEED_MM_S = 300.0
+TRAVEL_SPEED_MM_S = 800.0
+LIFT_TIME_S = 0.4
+BALANCED_LIFT_MM = 75.0
 
 
 def _distance(a: Point, b: Point) -> float:
@@ -66,6 +103,32 @@ def _unit(a: Point, b: Point) -> Point:
     if length <= 1e-12:
         return (0.0, 0.0)
     return (dx / length, dy / length)
+
+
+def start_point(sheet: SheetSpec | None, start: str = DEFAULT_START) -> Point:
+    """Devolve o ponto inicial do percurso para o canto pedido."""
+
+    if sheet is None or not sheet.is_valid:
+        return HOME
+    key = START_KEYS.get(start, start)
+    if key == "top-right":
+        return (sheet.width, 0.0)
+    if key == "bottom-left":
+        return (0.0, sheet.height)
+    if key == "bottom-right":
+        return (sheet.width, sheet.height)
+    if key == "center":
+        return (sheet.width / 2.0, sheet.height / 2.0)
+    return HOME
+
+
+def _order_length(order: list[int], centers: list[Point], home: Point) -> float:
+    total = 0.0
+    head = home
+    for index in order:
+        total += _distance(head, centers[index])
+        head = centers[index]
+    return total
 
 
 @dataclass(frozen=True)
@@ -144,6 +207,16 @@ class CutPlan:
             return 0.0
         return self.total_length / speed_mm_s
 
+    @property
+    def estimated_time(self) -> float:
+        """Tempo estimado em segundos com velocidades típicas de plotter."""
+
+        return (
+            self.cut_length / CUT_SPEED_MM_S
+            + self.travel_length / TRAVEL_SPEED_MM_S
+            + self.lift_count * LIFT_TIME_S
+        )
+
 
 @dataclass
 class _GraphEdge:
@@ -176,12 +249,18 @@ class _Trail:
     length: float
 
 
-def _nearest_neighbor(centers: list[Point], home: Point = HOME) -> list[int]:
+def _nearest_neighbor(
+    centers: list[Point], home: Point = HOME, first: int | None = None
+) -> list[int]:
     """Ordem de visita por vizinho mais próximo, em O(n²)."""
 
     remaining = list(range(len(centers)))
     order: list[int] = []
     current = home
+    if first is not None and 0 <= first < len(centers):
+        remaining.remove(first)
+        order.append(first)
+        current = centers[first]
     while remaining:
         best_position = 0
         best_distance = math.inf
@@ -253,18 +332,256 @@ def _zigzag_order(centers: list[Point], tolerance: float) -> list[int]:
     return order
 
 
+def _columns_order(centers: list[Point], tolerance: float) -> list[int]:
+    """Ordena por colunas, alternando o sentido em cada coluna."""
+
+    if not centers:
+        return []
+
+    indexed = sorted(
+        range(len(centers)), key=lambda index: (centers[index][0], centers[index][1])
+    )
+    columns: list[tuple[float, list[int]]] = []
+    for index in indexed:
+        x = centers[index][0]
+        if not columns or abs(x - columns[-1][0]) > tolerance:
+            columns.append((x, [index]))
+        else:
+            columns[-1][1].append(index)
+
+    order: list[int] = []
+    for column_number, (_x, column) in enumerate(columns):
+        column.sort(
+            key=lambda index: centers[index][1], reverse=bool(column_number % 2)
+        )
+        order.extend(column)
+    return order
+
+
+def _spiral_order(centers: list[Point], inward: bool = True) -> list[int]:
+    """Percorre os centros em anéis concêntricos, de fora para dentro."""
+
+    if not centers:
+        return []
+
+    xs = [point[0] for point in centers]
+    ys = [point[1] for point in centers]
+    cx = (min(xs) + max(xs)) / 2.0
+    cy = (min(ys) + max(ys)) / 2.0
+    half_w = max((max(xs) - min(xs)) / 2.0, 1e-9)
+    half_h = max((max(ys) - min(ys)) / 2.0, 1e-9)
+
+    items: list[tuple[float, float, int]] = []
+    for index, (x, y) in enumerate(centers):
+        ring = max(abs(x - cx) / half_w, abs(y - cy) / half_h)
+        angle = math.atan2(y - cy, x - cx)
+        items.append((ring, angle, index))
+
+    # Junta anéis muito próximos para não alternar entre linhas vizinhas.
+    items.sort(key=lambda item: (-item[0] if inward else item[0], item[1]))
+    rings: list[tuple[float, list[tuple[float, int]]]] = []
+    for ring, angle, index in items:
+        if not rings or abs(ring - rings[-1][0]) > 0.08:
+            rings.append((ring, [(angle, index)]))
+        else:
+            rings[-1][1].append((angle, index))
+
+    order: list[int] = []
+    for ring_number, (_ring, ring_items) in enumerate(rings):
+        reverse = bool(ring_number % 2)
+        ring_items.sort(key=lambda item: item[0], reverse=reverse)
+        order.extend(index for _angle, index in ring_items)
+    return order
+
+
+def _or_opt(
+    order: list[int],
+    centers: list[Point],
+    home: Point = HOME,
+    passes: int = 4,
+) -> list[int]:
+    """Melhora a ordem movendo pequenos blocos (Or-opt)."""
+
+    count = len(order)
+    if count < 5 or count > OR_OPT_LIMIT:
+        return order
+
+    order = list(order)
+    for _pass in range(passes):
+        improved = False
+        best_length = _order_length(order, centers, home)
+        for size in (1, 2, 3):
+            for start in range(count - size + 1):
+                block = order[start : start + size]
+                rest = order[:start] + order[start + size :]
+                for position in range(len(rest) + 1):
+                    if position == start:
+                        continue
+                    candidate = rest[:position] + block + rest[position:]
+                    length = _order_length(candidate, centers, home)
+                    if length + 1e-9 < best_length:
+                        order = candidate
+                        best_length = length
+                        improved = True
+                        break
+                if improved:
+                    break
+            if improved:
+                break
+        if not improved:
+            break
+    return order
+
+
+def _proximity_orders(
+    centers: list[Point], home: Point, optimize: bool
+) -> list[list[int]]:
+    """Gera ordens candidatas de proximidade (multi-start + melhorias)."""
+
+    if not centers:
+        return []
+
+    count = len(centers)
+    if not optimize or count > TWO_OPT_LIMIT:
+        return [_nearest_neighbor(centers, home)]
+
+    nearest = sorted(
+        range(count), key=lambda index: _squared_distance(home, centers[index])
+    )[: min(count, MULTI_START_LIMIT)]
+    candidates: list[list[int]] = []
+    for first in nearest:
+        order = _nearest_neighbor(centers, home, first=first)
+        order = _two_opt(order, centers, home)
+        order = _or_opt(order, centers, home)
+        if order not in candidates:
+            candidates.append(order)
+    return candidates or [_nearest_neighbor(centers, home)]
+
+
+def _best_proximity_order(
+    centers: list[Point], home: Point, optimize: bool
+) -> list[int]:
+    candidates = _proximity_orders(centers, home, optimize)
+    return min(candidates, key=lambda order: _order_length(order, centers, home))
+
+
+def _order_centers(
+    centers: list[Point],
+    strategy: str,
+    home: Point,
+    optimize: bool,
+) -> list[int]:
+    if strategy == STRATEGY_ZIGZAG:
+        return _zigzag_order(
+            centers, max(0.5, _median_gap(centers, axis=1) * 0.5)
+        )
+    if strategy == STRATEGY_COLUMNS:
+        return _columns_order(
+            centers, max(0.5, _median_gap(centers, axis=0) * 0.5)
+        )
+    if strategy == STRATEGY_SPIRAL:
+        return _spiral_order(centers)
+    return _best_proximity_order(centers, home, optimize)
+
+
+def _median_gap(centers: list[Point], axis: int) -> float:
+    values = sorted({round(point[axis], 3) for point in centers})
+    if len(values) < 2:
+        return 1.0
+    gaps = [b - a for a, b in zip(values, values[1:]) if b - a > 1e-6]
+    if not gaps:
+        return 1.0
+    gaps.sort()
+    return gaps[len(gaps) // 2]
+
+
+def objective_score(plan: CutPlan, objective: str) -> float:
+    """Pontuação do percurso para o objetivo ativo (menor é melhor)."""
+
+    objective = OBJECTIVE_KEYS.get(objective, objective)
+    if objective == OBJECTIVE_LIFTS:
+        return plan.lift_count * 1_000_000.0 + plan.total_length
+    if objective == OBJECTIVE_TIME:
+        return plan.estimated_time
+    if objective == OBJECTIVE_BALANCED:
+        return plan.total_length + plan.lift_count * BALANCED_LIFT_MM
+    return plan.total_length
+
+
+def compare_strategies(
+    label: LabelSpec,
+    layout: LayoutResult,
+    *,
+    sheet: SheetSpec | None = None,
+    quality: str = "high",
+    optimize: bool = True,
+    keep_blade_down: bool = True,
+    objective: str = OBJECTIVE_DISTANCE,
+    start: str = DEFAULT_START,
+) -> list[tuple[str, CutPlan]]:
+    """Calcula um percurso por estratégia, para comparação na interface."""
+
+    plans: list[tuple[str, CutPlan]] = []
+    for strategy in STRATEGY_LABELS:
+        plan = build_cut_plan(
+            label,
+            layout,
+            sheet=sheet,
+            quality=quality,
+            optimize=optimize,
+            strategy=strategy,
+            keep_blade_down=keep_blade_down,
+            objective=objective,
+            start=start,
+        )
+        if not plan.is_empty:
+            plans.append((strategy, plan))
+    plans.sort(key=lambda item: objective_score(item[1], objective))
+    return plans
+
+
+def compare_imported_strategies(
+    document,
+    *,
+    optimize: bool = True,
+    keep_blade_down: bool = True,
+    objective: str = OBJECTIVE_DISTANCE,
+    start: str = DEFAULT_START,
+) -> list[tuple[str, CutPlan]]:
+    """Calcula um percurso por estratégia para um documento importado."""
+
+    plans: list[tuple[str, CutPlan]] = []
+    for strategy in STRATEGY_LABELS:
+        plan = build_imported_cut_plan(
+            document,
+            optimize=optimize,
+            strategy=strategy,
+            keep_blade_down=keep_blade_down,
+            objective=objective,
+            start=start,
+        )
+        if not plan.is_empty:
+            plans.append((strategy, plan))
+    plans.sort(key=lambda item: objective_score(item[1], objective))
+    return plans
+
+
 def _node_key(point: Point) -> tuple[float, float]:
     x = round(point[0], SNAP_DECIMALS)
     y = round(point[1], SNAP_DECIMALS)
     return (0.0 if x == 0 else x, 0.0 if y == 0 else y)
 
 
-def _build_graph(entries: list[tuple[float, float, list[Point]]]):
+def _build_graph(
+    entries: list[tuple[float, float, list[Point]]],
+    closed_flags: list[bool] | None = None,
+):
     """Converte os contornos num grafo de arestas únicas.
 
     Arestas coincidentes (por exemplo a fronteira partilhada por duas
     etiquetas encostadas) ficam registadas uma só vez, com a lista de
-    etiquetas que as usam.
+    etiquetas que as usam. Caminhos abertos (importados) não são fechados
+    artificialmente.
     """
 
     node_ids: dict[tuple[float, float], int] = {}
@@ -284,11 +601,13 @@ def _build_graph(entries: list[tuple[float, float, list[Point]]]):
 
     for label_index, (_x, _y, contour) in enumerate(entries):
         count = len(contour)
-        if count < 3:
+        if count < 2:
             continue
-        for step in range(count):
+        closed = True if closed_flags is None else bool(closed_flags[label_index])
+        steps = count if closed else count - 1
+        for step in range(steps):
             p1 = contour[step]
-            p2 = contour[(step + 1) % count]
+            p2 = contour[(step + 1) % count] if closed else contour[step + 1]
             length = _distance(p1, p2)
             if length <= 1e-9:
                 continue
@@ -610,6 +929,16 @@ def _closed_contour_points(contour: list[Point], start_index: int) -> list[Point
     return [contour[(start_index + step) % count] for step in range(count + 1)]
 
 
+def _open_contour_points(contour: list[Point], point: Point) -> list[Point]:
+    """Escolhe o extremo mais próximo e percorre o caminho aberto completo."""
+
+    if len(contour) < 2:
+        return list(contour)
+    if _squared_distance(contour[0], point) <= _squared_distance(contour[-1], point):
+        return list(contour)
+    return list(reversed(contour))
+
+
 def _nearest_index(contour: list[Point], point: Point) -> int:
     return min(
         range(len(contour)),
@@ -632,22 +961,28 @@ def _entry_contours(
 def _per_label_plan(
     entries: list[tuple[float, float, list[Point]]],
     label_order: list[int],
-    label: LabelSpec,
+    overlap: float,
     *,
     keep_blade_down: bool,
     truncated: bool,
     strategy: str,
+    home: Point = HOME,
+    closed_flags: list[bool] | None = None,
 ) -> CutPlan:
     """Percurso por etiqueta, sem fundir contornos (modo normal)."""
 
     segments: list[CutSegment] = []
-    head = HOME
+    head = home
 
     for index in label_order:
         contour = entries[index][2]
+        closed = True if closed_flags is None else bool(closed_flags[index])
         start_index = _nearest_index(contour, head)
-        points = _closed_contour_points(contour, start_index)
-        points = _apply_overlap(points, label.overlap)
+        if closed:
+            points = _closed_contour_points(contour, start_index)
+            points = _apply_overlap(points, overlap)
+        else:
+            points = _open_contour_points(contour, head)
         start = points[0]
         travel = _distance(head, start)
 
@@ -681,38 +1016,20 @@ def _per_label_plan(
     )
 
 
-def build_cut_plan(
-    label: LabelSpec,
-    layout: LayoutResult,
+def _build_plan_from_entries(
+    entries: list[tuple[float, float, list[Point]]],
+    closed_flags: list[bool],
+    overlap: float,
     *,
-    quality: str = "high",
-    optimize: bool = True,
-    strategy: str = STRATEGY_PROXIMITY,
-    keep_blade_down: bool = True,
+    label_count: int,
+    home: Point,
+    optimize: bool,
+    strategy: str,
+    keep_blade_down: bool,
+    truncated: bool,
 ) -> CutPlan:
-    """Constrói o percurso de corte otimizado para o layout atual."""
+    """Constrói um percurso a partir de contornos genéricos."""
 
-    strategy = STRATEGY_KEYS.get(strategy, strategy)
-    if strategy not in STRATEGY_LABELS:
-        strategy = STRATEGY_PROXIMITY
-
-    if not label.is_valid or not layout.positions:
-        return CutPlan(strategy=strategy, keep_blade_down=keep_blade_down)
-
-    truncated = len(layout.positions) > MAX_PLAN_LABELS
-    if truncated:
-        layout = LayoutResult(
-            positions=layout.positions[:MAX_PLAN_LABELS],
-            columns=layout.columns,
-            rows=layout.rows,
-            cell_width=layout.cell_width,
-            cell_height=layout.cell_height,
-            block_width=layout.block_width,
-            block_height=layout.block_height,
-            fits=layout.fits,
-        )
-
-    entries = _entry_contours(label, layout, quality)
     if not entries:
         return CutPlan(
             truncated=truncated,
@@ -721,34 +1038,40 @@ def build_cut_plan(
         )
 
     centers = [
-        (x + label.width / 2.0, y + label.height / 2.0) for x, y, _contour in entries
+        (
+            (min(point[0] for point in contour) + max(point[0] for point in contour))
+            / 2.0,
+            (min(point[1] for point in contour) + max(point[1] for point in contour))
+            / 2.0,
+        )
+        for _x, _y, contour in entries
     ]
-    if strategy == STRATEGY_ZIGZAG:
-        label_order = _zigzag_order(centers, max(0.5, label.height / 2.0))
-    else:
-        label_order = _nearest_neighbor(centers)
-        if optimize:
-            label_order = _two_opt(label_order, centers)
+    label_order = _order_centers(centers, strategy, home, optimize)
 
-    if not keep_blade_down:
+    per_label = strategy == STRATEGY_PER_LABEL or not keep_blade_down
+    if per_label:
         return _per_label_plan(
             entries,
             label_order,
-            label,
+            overlap,
             keep_blade_down=False,
             truncated=truncated,
             strategy=strategy,
+            home=home,
+            closed_flags=closed_flags,
         )
 
-    node_points, edges = _build_graph(entries)
+    node_points, edges = _build_graph(entries, closed_flags)
     if not edges or len(edges) > MAX_GRAPH_EDGES:
         return _per_label_plan(
             entries,
             label_order,
-            label,
+            overlap,
             keep_blade_down=True,
             truncated=truncated,
             strategy=strategy,
+            home=home,
+            closed_flags=closed_flags,
         )
 
     adjacency = _adjacency(edges, len(node_points))
@@ -757,26 +1080,23 @@ def build_cut_plan(
         return _per_label_plan(
             entries,
             label_order,
-            label,
+            overlap,
             keep_blade_down=True,
             truncated=truncated,
             strategy=strategy,
+            home=home,
+            closed_flags=closed_flags,
         )
 
     component_centers = [component.center for component in components]
-    if strategy == STRATEGY_ZIGZAG:
-        component_order = _zigzag_order(
-            component_centers, max(0.5, label.height / 2.0)
-        )
-    else:
-        component_order = _nearest_neighbor(component_centers)
-        if optimize:
-            component_order = _two_opt(component_order, component_centers)
+    component_order = _order_centers(
+        component_centers, strategy, home, optimize
+    )
 
     segments: list[CutSegment] = []
     order: list[int] = []
     seen_labels: set[int] = set()
-    head = HOME
+    head = home
 
     for component_index in component_order:
         component = components[component_index]
@@ -791,7 +1111,14 @@ def build_cut_plan(
         trails, _ordered_head = _order_trails(trails, head)
 
         for trail in trails:
-            points = _apply_overlap(trail.points, label.overlap)
+            trail_closed = all(
+                closed_flags[index] for index in trail.labels
+            ) if trail.labels else True
+            points = (
+                _apply_overlap(trail.points, overlap)
+                if trail_closed and overlap > 1e-9
+                else trail.points
+            )
             start = points[0]
             travel = _distance(head, start)
             linked = False
@@ -833,9 +1160,123 @@ def build_cut_plan(
     return CutPlan(
         segments=segments,
         order=order,
-        label_count=len(entries),
+        label_count=label_count,
         truncated=truncated,
         strategy=strategy,
+        keep_blade_down=True,
+    )
+
+
+def build_cut_plan(
+    label: LabelSpec,
+    layout: LayoutResult,
+    *,
+    sheet: SheetSpec | None = None,
+    quality: str = "high",
+    optimize: bool = True,
+    strategy: str = STRATEGY_PROXIMITY,
+    keep_blade_down: bool = True,
+    objective: str = OBJECTIVE_DISTANCE,
+    start: str = DEFAULT_START,
+) -> CutPlan:
+    """Constrói o percurso de corte otimizado para o layout atual.
+
+    ``objective`` é usado para ordenar/recomendar percursos em
+    :func:`compare_strategies`; o percurso devolvido aqui segue ``strategy``.
+    O número de elevações depende da estratégia e da geometria, não da ordem
+    dos contornos, pelo que a comparação entre estratégias é o local correto
+    para aplicar o objetivo.
+    """
+
+    strategy = STRATEGY_KEYS.get(strategy, strategy)
+    if strategy not in STRATEGY_LABELS:
+        strategy = STRATEGY_PROXIMITY
+    objective = OBJECTIVE_KEYS.get(objective, objective)
+
+    home = start_point(sheet, start)
+    if not label.is_valid or not layout.positions:
+        return CutPlan(strategy=strategy, keep_blade_down=keep_blade_down)
+
+    truncated = len(layout.positions) > MAX_PLAN_LABELS
+    if truncated:
+        layout = LayoutResult(
+            positions=layout.positions[:MAX_PLAN_LABELS],
+            columns=layout.columns,
+            rows=layout.rows,
+            cell_width=layout.cell_width,
+            cell_height=layout.cell_height,
+            block_width=layout.block_width,
+            block_height=layout.block_height,
+            fits=layout.fits,
+        )
+
+    entries = _entry_contours(label, layout, quality)
+    if not entries:
+        return CutPlan(
+            truncated=truncated,
+            strategy=strategy,
+            keep_blade_down=keep_blade_down,
+        )
+
+    plan = _build_plan_from_entries(
+        entries,
+        [True] * len(entries),
+        label.overlap,
+        label_count=len(entries),
+        home=home,
+        optimize=optimize,
+        strategy=strategy,
         keep_blade_down=keep_blade_down,
+        truncated=truncated,
+    )
+    return plan
+
+
+def build_imported_cut_plan(
+    document,
+    *,
+    quality: str = "high",
+    optimize: bool = True,
+    strategy: str = STRATEGY_PROXIMITY,
+    keep_blade_down: bool = True,
+    objective: str = OBJECTIVE_DISTANCE,
+    start: str = DEFAULT_START,
+) -> CutPlan:
+    """Constrói o percurso para um documento importado (DXF/PDF).
+
+    Tal como em :func:`build_cut_plan`, ``objective`` serve para ordenar os
+    percursos em :func:`compare_imported_strategies`; o percurso devolvido
+    segue ``strategy``.
+    """
+
+    strategy = STRATEGY_KEYS.get(strategy, strategy)
+    if strategy not in STRATEGY_LABELS:
+        strategy = STRATEGY_PROXIMITY
+    objective = OBJECTIVE_KEYS.get(objective, objective)
+
+    entries: list[tuple[float, float, list[Point]]] = []
+    closed_flags: list[bool] = []
+    for path in getattr(document, "paths", []):
+        points = list(path.points)
+        if len(points) < 2:
+            continue
+        entries.append((0.0, 0.0, points))
+        closed_flags.append(bool(path.closed))
+
+    home = start_point(getattr(document, "sheet", None), start)
+    truncated = len(entries) > MAX_PLAN_LABELS
+    if truncated:
+        entries = entries[:MAX_PLAN_LABELS]
+        closed_flags = closed_flags[:MAX_PLAN_LABELS]
+    return _build_plan_from_entries(
+        entries,
+        closed_flags,
+        0.0,
+        label_count=len(entries),
+        home=home,
+        optimize=optimize,
+        strategy=strategy,
+        keep_blade_down=keep_blade_down,
+        truncated=truncated,
     )
 

@@ -1,4 +1,4 @@
-"""Ponto de entrada da DieCUT Tool v3."""
+"""Ponto de entrada da DieCUT Tool v4."""
 
 from __future__ import annotations
 
@@ -7,14 +7,21 @@ from pathlib import Path
 
 import customtkinter as ctk
 
-from app.exporters import export_dxf, export_pdf
+from app.cutting import build_cut_plan, build_imported_cut_plan
+from app.exporters import (
+    export_cut_plan_dxf,
+    export_cut_plan_pdf,
+    export_dxf,
+    export_pdf,
+)
+from app.importers import load_dxf, load_pdf
 from app.layout import compute_layout
 from app.models import LabelSpec, LayoutSpec, ShapeType, SheetSpec
 from app.ui.main_window import MainWindow
 
 
 def _run_selftest() -> int:
-    """Verifica a exportação no ambiente atual (útil para o executável)."""
+    """Verifica exportação, importação e percurso no ambiente atual."""
 
     try:
         index = sys.argv.index("--selftest")
@@ -30,7 +37,28 @@ def _run_selftest() -> int:
     dxf_path = output / "selftest.dxf"
     export_pdf(pdf_path, sheet, label, layout)
     export_dxf(dxf_path, sheet, label, layout)
-    return 0 if pdf_path.stat().st_size > 0 and dxf_path.stat().st_size > 0 else 1
+
+    if pdf_path.stat().st_size <= 0 or dxf_path.stat().st_size <= 0:
+        return 1
+
+    try:
+        plan = build_cut_plan(label, layout, sheet=sheet)
+        build_imported_cut_plan(load_pdf(pdf_path))
+        build_imported_cut_plan(load_dxf(dxf_path))
+        export_cut_plan_pdf(output / "selftest_corte.pdf", sheet, plan)
+        export_cut_plan_dxf(output / "selftest_corte.dxf", sheet, plan)
+    except Exception as exc:  # pragma: no cover - diagnóstico do executável
+        import traceback
+
+        detail = traceback.format_exc()
+        print(f"selftest: {exc}", file=sys.stderr)
+        try:
+            (output / "selftest-error.txt").write_text(detail, encoding="utf-8")
+        except OSError:
+            pass
+        return 2
+
+    return 0
 
 
 def main() -> None:
