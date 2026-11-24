@@ -163,6 +163,65 @@ class Card(ctk.CTkFrame):
         self.body.pack(fill="x", padx=14, pady=(4, 12))
 
 
+class Tooltip:
+    """Dica flutuante simples para um widget."""
+
+    def __init__(self, widget, text: str, *, delay: int = 450) -> None:
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self._after: str | None = None
+        self._window: ctk.CTkToplevel | None = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _schedule(self, _event=None) -> None:
+        self._cancel()
+        self._after = self.widget.after(self.delay, self._show)
+
+    def _cancel(self) -> None:
+        if self._after is not None:
+            try:
+                self.widget.after_cancel(self._after)
+            except Exception:
+                pass
+            self._after = None
+
+    def _show(self) -> None:
+        if self._window is not None:
+            return
+        try:
+            x = self.widget.winfo_rootx() + 12
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        except Exception:
+            return
+        window = ctk.CTkToplevel(self.widget)
+        window.wm_overrideredirect(True)
+        window.attributes("-topmost", True)
+        try:
+            window.configure(fg_color=theme.CARD_ALT)
+        except Exception:
+            pass
+        label = ctk.CTkLabel(
+            window,
+            text=self.text,
+            font=theme.font(10),
+            text_color=theme.TEXT,
+            fg_color="transparent",
+        )
+        label.pack(padx=10, pady=6)
+        window.geometry(f"+{x}+{y}")
+        self._window = window
+
+    def _hide(self, _event=None) -> None:
+        self._cancel()
+        if self._window is not None:
+            try:
+                self._window.destroy()
+            except Exception:
+                pass
+            self._window = None
 class StatusDot(ctk.CTkLabel):
     def __init__(self, master, color: str = theme.GREEN, **kwargs) -> None:
         super().__init__(

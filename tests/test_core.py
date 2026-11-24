@@ -720,8 +720,8 @@ class VersionTests(unittest.TestCase):
     def test_version_metadata(self) -> None:
         from app.ui.about import _version_text
 
-        self.assertEqual(__version__, "4")
-        self.assertIn("DieCUT Tool v4", _version_text())
+        self.assertEqual(__version__, "4.1")
+        self.assertIn("DieCUT Tool v4.1", _version_text())
 
 
 if __name__ == "__main__":

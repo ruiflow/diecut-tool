@@ -8,7 +8,7 @@
 
 Pré-visualização 2D/3D com órbita livre, simulação de corte com percurso otimizado, importação de **DXF/PDF**, distribuição automática e exportação vetorial para **PDF** e **DXF**.
 
-[![Baixar v4](https://img.shields.io/badge/Baixar-v4%20EXE-ff2d95?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/latest/download/DieCutTool-v4.exe)
+[![Baixar v4.1](https://img.shields.io/badge/Baixar-v4.1%20EXE-ff2d95?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/latest/download/DieCutTool-v4.1.exe)
 [![Baixar v3](https://img.shields.io/badge/Baixar-v3%20EXE-4b4b63?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/download/v3/DieCutTool-v3.exe)
 [![Baixar v2](https://img.shields.io/badge/Baixar-v2%20EXE-4b4b63?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/download/v2/DieCutTool-v2.exe)
 [![Baixar v1](https://img.shields.io/badge/Baixar-v1%20EXE%20(legado)-2b2b38?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/ruiflow/diecut-tool/releases/download/v1/DieCutTool-v1.exe)
@@ -102,12 +102,13 @@ não é preciso instalar Python nem dependências.
 
 | Versão | Arquivo | Tamanho | Observação |
 | --- | --- | --- | --- |
-| **v4** | `DieCutTool-v4.exe` | ~40 MB | Atual: cinco estratégias, comparação de percursos, importação DXF/PDF e “Acerca de” |
+| **v4.1** | `DieCutTool-v4.1.exe` | ~40 MB | Atual: interface v4.1 (barra de ocupação, dicas, refinamentos visuais) |
+| **v4** | `DieCutTool-v4.exe` | ~40 MB | Cinco estratégias, comparação de percursos, importação DXF/PDF e “Acerca de” |
 | **v3** | `DieCutTool-v3.exe` | ~38 MB | Percurso por proximidade/zigue-zague, sem repetir arestas, guardar corte em DXF/PDF |
 | **v2** | `DieCutTool-v2.exe` | ~36 MB | Interface nova, 2D/3D, DXF e modo automático |
 | **v1** | `DieCutTool-v1.exe` | ~30 MB | Versão original (legado), mantida para compatibilidade |
 
-> O código-fonte atual está em **`app/`** e corresponde à **v4**. O executável
+> O código-fonte atual está em **`app/`** e corresponde à **v4.1**. O executável
 > publicado já inclui todas as funcionalidades descritas acima.
 
 > O Windows pode exibir o aviso do SmartScreen porque o executável não é assinado

@@ -1,5 +1,16 @@
 # Changelog
 
+## [4.1]
+
+### Alterado
+- **Interface v4.1**: barra de estado com indicador de ocupação visual (barra
+  de progresso com código de cor), dicas flutuantes nos controlos principais,
+  paleta e tipografia refinadas para melhor contraste e legibilidade.
+- Versão da aplicação atualizada para 4.1.
+
+### Corrigido
+- Compatibilidade do tooltip com `CTkSegmentedButton` (removido bind não suportado).
+
 ## [4]
 
 ### Adicionado

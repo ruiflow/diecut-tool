@@ -53,12 +53,12 @@ from .about import show_about
 from .compare_dialog import CompareDialog
 from .import_dialog import ImportDialog
 from .preview import PreviewCanvas
-from .widgets import Card, NumberSpinbox, StatusDot
+from .widgets import Card, NumberSpinbox, StatusDot, Tooltip
 
 
 class MainWindow(ctk.CTk):
     APP_NAME = "DieCUT Tool"
-    VERSION = "4"
+    VERSION = "4.1"
 
     def __init__(self) -> None:
         super().__init__(fg_color=theme.BG)
@@ -85,6 +85,7 @@ class MainWindow(ctk.CTk):
 
         self._create_variables()
         self._build_layout()
+        self._apply_tooltips()
         self._attach_traces()
 
         self.after(80, self._refresh)
@@ -914,13 +915,28 @@ class MainWindow(ctk.CTk):
         )
         self.status_label.pack(side="left")
 
-        self.occupancy_label = ctk.CTkLabel(
-            bar,
-            text="",
-            font=theme.font(10),
-            text_color=theme.MUTED,
+        self.occupancy_frame = ctk.CTkFrame(bar, fg_color="transparent")
+        self.occupancy_frame.pack(side="right", padx=(10, 18))
+
+        self.occupancy_bar = ctk.CTkProgressBar(
+            self.occupancy_frame,
+            width=110,
+            height=6,
+            corner_radius=3,
+            fg_color=theme.BORDER,
+            progress_color=theme.ACCENT,
         )
-        self.occupancy_label.pack(side="right", padx=(10, 18))
+        self.occupancy_bar.pack(side="left", padx=(0, 8))
+        self.occupancy_bar.set(0)
+
+        self.occupancy_label = ctk.CTkLabel(
+            self.occupancy_frame,
+            text="",
+            font=theme.font(10, "bold"),
+            text_color=theme.TEXT_DIM,
+            width=74,
+        )
+        self.occupancy_label.pack(side="left")
 
         self.count_label = ctk.CTkLabel(
             bar,
@@ -933,6 +949,18 @@ class MainWindow(ctk.CTk):
     # ------------------------------------------------------------------
     #  Helpers de UI
     # ------------------------------------------------------------------
+    def _apply_tooltips(self) -> None:
+        Tooltip(self.import_button, "Importar um DXF ou PDF vetorial (Ctrl+I)")
+        Tooltip(self.close_import_button, "Fechar o documento importado e voltar ao layout manual")
+        Tooltip(self.pdf_button, "Exportar dielines ou percurso em PDF vetorial (Ctrl+P)")
+        Tooltip(self.dxf_button, "Exportar dielines ou percurso em DXF em milímetros (Ctrl+D)")
+        Tooltip(self.sim_button, "Iniciar/parar a simulação de corte (F5)")
+        Tooltip(self.compare_button, "Calcular todas as estratégias e aplicar a melhor")
+        Tooltip(self.auto_switch, "Calcular automaticamente o número máximo de etiquetas")
+        Tooltip(self.fit_button, "Ajustar a pré-visualização à janela (Ctrl+0)")
+        Tooltip(self.blade_switch, "Fundir contornos que se tocam num só percurso")
+
+
     def _add_field(
         self,
         parent,
@@ -1578,11 +1606,20 @@ class MainWindow(ctk.CTk):
 
         if sheet.is_valid and label.is_valid:
             occupancy = geometry.shape_area(label) * layout.count / sheet.area * 100.0
-            self.occupancy_label.configure(text=f"Ocupação {occupancy:.1f}%")
+            self.occupancy_bar.set(max(0.0, min(1.0, occupancy / 100.0)))
+            # Color the bar by occupancy level.
+            if occupancy >= 85:
+                self.occupancy_bar.configure(progress_color=theme.GREEN)
+            elif occupancy >= 60:
+                self.occupancy_bar.configure(progress_color=theme.ACCENT)
+            else:
+                self.occupancy_bar.configure(progress_color=theme.AMBER)
+            self.occupancy_label.configure(text=f"{occupancy:.1f}%")
             self.count_label.configure(
                 text=f"{layout.columns} × {layout.rows}  •  {layout.count} etiquetas"
             )
         else:
+            self.occupancy_bar.set(0)
             self.occupancy_label.configure(text="")
             self.count_label.configure(text="")
 

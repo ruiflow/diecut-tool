@@ -47,7 +47,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="DieCutTool v4",
+    name="DieCutTool v4.1",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
